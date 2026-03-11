@@ -21,9 +21,11 @@ import { JWT_CONFIG } from 'src/config/jwt.config';
 import {
   ApiResponse,
   CreateProfileResponse,
+  LoginResponse,
   SendOtpResponse,
   VerifyOtpResponse,
 } from './interfaces/auth-response.interface';
+import { LoginDto } from './dto/login.dto';
 
 @Injectable()
 export class AuthService {
@@ -141,6 +143,56 @@ export class AuthService {
 
     return {
       message: MESSAGES.PROFILE_CREATED,
+      data: {
+        userId: user.id,
+        accessToken,
+        refreshToken,
+      },
+    };
+  }
+
+  async login(dto: LoginDto): Promise<ApiResponse<LoginResponse>> {
+    const user = await this.userRepo.findOne({
+      where: dto.email
+        ? { email: dto.email }
+        : dto.phone
+          ? { phone: dto.phone }
+          : { username: dto.username },
+    });
+
+    if (!user || !user.isVerified) {
+      throw new UnauthorizedException(MESSAGES.INVALID_CREDENTIALS);
+    }
+
+    const passwordMatch = await bcrypt.compare(dto.password, user.password);
+
+    if (!passwordMatch) {
+      throw new UnauthorizedException(MESSAGES.INVALID_CREDENTIALS);
+    }
+
+    const payload = {
+      userId: user.id,
+      username: user.username,
+    };
+
+    const accessToken = this.jwtService.sign(payload, {
+      secret: JWT_CONFIG.secret,
+      expiresIn: JWT_CONFIG.expiresIn,
+    });
+
+    const refreshToken = this.jwtService.sign(payload, {
+      secret: JWT_CONFIG.refreshSecret,
+      expiresIn: JWT_CONFIG.refreshExpiresIn,
+    });
+
+    const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+
+    // await this.userRepo.update(user.id, {
+    //   refreshToken: hashedRefreshToken,
+    // });
+
+    return {
+      message: MESSAGES.LOGIN_SUCCESS,
       data: {
         userId: user.id,
         accessToken,

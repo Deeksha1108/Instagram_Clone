@@ -7,4 +7,6 @@ export const MESSAGES = {
   PROFILE_CREATED: 'Profile created successfully',
   OTP_SENT: 'OTP sent successfully',
   OTP_VERIFIED: 'OTP verified successfully',
+  LOGIN_SUCCESS: 'Login successful',
+  INVALID_CREDENTIALS: 'Invalid email, phone or password',
 };

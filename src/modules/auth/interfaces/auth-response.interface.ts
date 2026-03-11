@@ -16,3 +16,9 @@ export interface CreateProfileResponse {
   accessToken: string;
   refreshToken: string;
 }
+
+export interface LoginResponse {
+  userId: string;
+  accessToken: string;
+  refreshToken: string;
+}

@@ -1,5 +1,17 @@
-import { Body, Controller, HttpCode, Post, Req, UseGuards } from '@nestjs/common';
-import { ApiBasicAuth, ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBasicAuth,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiTags,
+} from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
@@ -7,6 +19,7 @@ import { CreateProfileDto } from './dto/create-profile.dto';
 import { TempTokenGuard } from 'src/common/guards/temp-token.guard';
 import type { RequestWithTempToken } from 'src/common/types/auth.types';
 import { BasicAuthGuard } from 'src/common/guards/basic-auth.guard';
+import { LoginDto } from './dto/login.dto';
 
 @ApiTags('Auth Module')
 @Controller('auth')
@@ -43,5 +56,14 @@ export class AuthController {
     @Req() req: RequestWithTempToken,
   ) {
     return this.authService.createProfile(dto, req.tempTokenData);
+  }
+
+  @Post('login')
+  @UseGuards(BasicAuthGuard)
+  @ApiBasicAuth('BasicAuth')
+  @ApiOperation({ summary: 'Login with email/ phone/ password' })
+  @HttpCode(200)
+  login(@Body() dto: LoginDto) {
+    return this.authService.login(dto);
   }
 }
