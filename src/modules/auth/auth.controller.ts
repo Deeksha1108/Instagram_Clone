@@ -1,0 +1,47 @@
+import { Body, Controller, HttpCode, Post, Req, UseGuards } from '@nestjs/common';
+import { ApiBasicAuth, ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { AuthService } from './auth.service';
+import { SendOtpDto } from './dto/send-otp.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
+import { CreateProfileDto } from './dto/create-profile.dto';
+import { TempTokenGuard } from 'src/common/guards/temp-token.guard';
+import type { RequestWithTempToken } from 'src/common/types/auth.types';
+import { BasicAuthGuard } from 'src/common/guards/basic-auth.guard';
+
+@ApiTags('Auth Module')
+@Controller('auth')
+export class AuthController {
+  constructor(private readonly authService: AuthService) {}
+
+  @Post('send-otp')
+  @UseGuards(BasicAuthGuard)
+  @ApiBasicAuth('BasicAuth')
+  @ApiOperation({ summary: 'Send OTP using email or phone' })
+  @HttpCode(200)
+  sendOtp(@Body() dto: SendOtpDto) {
+    return this.authService.sendOtp(dto);
+  }
+
+  @Post('verify-otp')
+  @UseGuards(TempTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Verify OTP — pass token from sendOtp in Authorization header',
+  })
+  @HttpCode(200)
+  verifyOtp(@Body() dto: VerifyOtpDto, @Req() req: RequestWithTempToken) {
+    return this.authService.verifyOtp(dto, req.tempTokenData);
+  }
+
+  @Post('create-profile')
+  @UseGuards(TempTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create user profile after OTP verification' })
+  @HttpCode(201)
+  createProfile(
+    @Body() dto: CreateProfileDto,
+    @Req() req: RequestWithTempToken,
+  ) {
+    return this.authService.createProfile(dto, req.tempTokenData);
+  }
+}
