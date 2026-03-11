@@ -1,5 +1,5 @@
 import {
-    ValidationArguments,
+  ValidationArguments,
   ValidatorConstraint,
   ValidatorConstraintInterface,
 } from 'class-validator';

@@ -1,98 +1,318 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Instagram Clone – Onboarding Service (OTP + JWT Auth)
+## Secure User Authentication using NestJS + PostgreSQL + Redis
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+This Onboarding Service handles **user registration and authentication**
+through an OTP-based verification flow using JWT tokens and Redis session management.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+It demonstrates how **real-world backend systems** implement secure,
+stateless authentication with token-based session handling
+decoupled from the main application logic.
 
-## Description
+The goal of this service is to show **how production-grade auth systems work** —
+from identity verification to profile creation — in a clean, scalable, and secure manner.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+---
 
-## Project setup
+## What is OTP-Based Auth (Easy Explanation)
 
-```bash
-$ npm install
+Instead of directly asking a user for a password during registration,
+OTP-based auth works like this:
+
+User → sends email/phone → OTP generated → stored in Redis → JWT temp token returned
+
+This approach ensures:
+
+- Identity verified before profile creation
+- No plaintext OTP stored (bcrypt hashed in Redis)
+- Stateless flow using JWT tokens
+- Session auto-expires via Redis TTL
+
+---
+
+## Authentication Flow
+
+The registration flow has **3 steps**:
+
+1. Send OTP
+2. Verify OTP
+3. Create Profile
+
+Each step is guarded and validated independently.
+
+---
+
+## Why JWT + Redis Together?
+
+JWT and Redis serve different purposes in this system:
+
+- **JWT (Temp Token)**
+  - Carries identity (email/phone) between steps
+  - Stateless — no DB lookup needed
+  - Expires in 5 minutes (same as OTP TTL)
+
+- **Redis (OTP Session)**
+  - Stores hashed OTP securely
+  - Tracks `verified` state between steps
+  - Auto-expires using TTL — no manual cleanup needed
+
+---
+
+## API Flow Implemented
+
+### Step 1 — Send OTP (BasicAuth Protected)
+
+Used to initiate registration with email or phone.
+
+Request:
+POST /auth/send-otp
+
+Protected by BasicAuth (app-level authentication).
+
+Flow:
+Client → BasicAuthGuard → OTP generated → hashed & stored in Redis → JWT temp token returned
+
+---
+
+### Step 2 — Verify OTP (TempToken Protected)
+
+Used to verify the OTP received by the user.
+
+Request:
+POST /auth/verify-otp
+
+Protected by TempTokenGuard (JWT in Authorization header).
+
+Flow:
+Client → TempTokenGuard → extract identifier from JWT → fetch OTP from Redis → bcrypt.compare → mark verified
+
+---
+
+### Step 3 — Create Profile (TempToken Protected)
+
+Used to complete registration after OTP is verified.
+
+Request:
+POST /auth/create-profile
+
+Protected by TempTokenGuard (same JWT from Step 1).
+
+Flow:
+Client → TempTokenGuard → check Redis verified:true → create user in DB → return accessToken + refreshToken
+
+---
+
+## Security Concepts Applied
+
+### OTP Hashing
+OTP is hashed using bcrypt before storing in Redis.
+Plain OTP is never stored anywhere.
+
+### JWT Temp Token
+Contains only identity info (email/phone + type).
+Used exclusively for the onboarding flow.
+Expires in the same TTL as the OTP session.
+
+### Access + Refresh Tokens
+After profile creation, two tokens are issued:
+- Access Token — short-lived (10 minutes)
+- Refresh Token — long-lived (7 days)
+
+---
+
+## Tech Stack Used
+
+- NestJS
+- PostgreSQL
+- TypeORM
+- Redis (ioredis)
+- JWT (@nestjs/jwt)
+- bcrypt
+- class-validator / class-transformer
+- Swagger (@nestjs/swagger)
+- dotenv
+- tsconfig-paths
+
+---
+
+## Project Folder Structure
+
+```
+src/
+├── common/
+│   ├── constants/
+│   │   └── constants.ts
+│   ├── guards/
+│   │   ├── basic-auth.guard.ts
+│   │   └── temp-token.guard.ts
+│   ├── interceptors/
+│   │   ├── request.interceptor.ts
+│   │   └── response.interceptor.ts
+│   ├── filters/
+│   │   └── http-exception.filter.ts
+│   └── types/
+│       └── auth.types.ts
+├── config/
+│   └── jwt.config.ts
+├── database/
+│   ├── data-source.ts
+│   ├── database.module.ts
+│   └── migrations/
+├── modules/
+│   ├── auth/
+│   │   ├── constants/
+│   │   ├── dto/
+│   │   ├── interfaces/
+│   │   ├── response/
+│   │   ├── auth.controller.ts
+│   │   ├── auth.module.ts
+│   │   └── auth.service.ts
+│   └── user/
+│       ├── entities/
+│       │   └── user.entity.ts
+│       └── users.module.ts
+├── shared/
+│   └── redis/
+│       ├── redis.module.ts
+│       └── redis.service.ts
+├── app.module.ts
+└── main.ts
 ```
 
-## Compile and run the project
+---
 
-```bash
-# development
-$ npm run start
+## Setup Instructions
 
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+### Clone Repository
+```
+git clone <your-repo-url>
+cd instagram-clone
+npm install
 ```
 
-## Run tests
+---
 
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+### Start PostgreSQL
+Make sure PostgreSQL is running and a database is created:
+```
+CREATE DATABASE instagram_clone;
 ```
 
-## Deployment
+---
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+### Start Redis
+```
+redis-server
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+Or using Docker:
+```
+docker run -d --name redis -p 6379:6379 redis
+```
 
-## Resources
+---
 
-Check out a few resources that may come in handy when working with NestJS:
+### Configure Environment Variables
+Create a `.env` file in the root:
+```
+DB_HOST=localhost
+DB_PORT=5432
+DB_USERNAME=postgres
+DB_PASSWORD=your_password
+DB_NAME=instagram_clone
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+JWT_SECRET=your_jwt_secret
+JWT_EXPIRES_IN=600
+JWT_REFRESH_SECRET=your_refresh_secret
+JWT_REFRESH_EXPIRES_IN=604800
 
-## Support
+PORT=3000
+```
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+---
 
-## Stay in touch
+### Run Database Migrations
+```
+npm run migration:generate
+npm run migration:run
+```
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+---
 
-## License
+### Start Application
+```
+npm run start:dev
+```
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+---
+
+## Swagger API Docs
+
+After starting the app, open:
+
+```
+http://localhost:3000/api
+```
+
+All endpoints are documented with request/response schemas.
+BasicAuth and BearerAuth are both configured in Swagger.
+
+---
+
+## Internal Working (Step-by-Step)
+
+1. Client sends email/phone with BasicAuth credentials
+2. OTP is generated and hashed with bcrypt
+3. Hashed OTP + `verified: false` stored in Redis with TTL
+4. JWT temp token signed with identifier (email/phone) returned to client
+5. Client sends OTP with temp token in Authorization header
+6. Guard validates JWT → extracts identifier → Redis fetched
+7. bcrypt.compare verifies OTP → Redis updated to `verified: true`
+8. Client sends profile data with same temp token
+9. Guard validates JWT → Redis checked for `verified: true`
+10. User saved in PostgreSQL → Redis key deleted → accessToken + refreshToken returned
+
+---
+
+## Migration Commands
+
+| Command | Description |
+|---------|-------------|
+| `npm run migration:generate` | Generate migration from entity changes |
+| `npm run migration:run` | Apply pending migrations to DB |
+| `npm run migration:revert` | Revert last applied migration |
+
+---
+
+## Production-Level Concepts Applied
+
+- OTP hashing with bcrypt (no plaintext OTP storage)
+- Redis TTL for automatic session expiry
+- JWT-based stateless authentication
+- Separation of temp token and access/refresh tokens
+- Guard-based route protection
+- Global exception filter for consistent error responses
+- Global response interceptor for consistent API shape
+- Request logging interceptor
+- Environment-based configuration with `getOrThrow`
+- Path alias resolution via tsconfig-paths
+
+---
+
+## What I Learned from This Project
+
+- How **OTP-based authentication** works in production
+- How **Redis** is used for short-lived session management
+- How **JWT** enables stateless identity transfer between steps
+- How to implement **multi-step auth flows** in NestJS
+- How **Guards** protect routes at different levels
+- How to structure a **modular NestJS backend** cleanly
+- How to use **TypeORM migrations** for schema management
+
+---
+
+## Made By Deeksha
+
+This **Instagram Clone Backend** demonstrates a **production-grade OTP authentication system**
+using NestJS with JWT, Redis, and PostgreSQL.
+It implements a clean **3-step onboarding flow** with proper security,
+token management, and modular architecture.
