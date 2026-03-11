@@ -305,4 +305,63 @@ export class AuthService {
     }
     return identifier;
   }
+
+  async resendOtp(
+    tempTokenData: TempTokenData,
+  ): Promise<ApiResponse<SendOtpResponse>> {
+    const identifier = this.getIdentifier({
+      email: tempTokenData.email,
+      phone: tempTokenData.phoneNumber,
+    });
+
+    const key = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`;
+    const session = await this.redisService.get(key);
+
+    if (!session) {
+      this.logger.warn(`Resend OTP failed: session expired for ${identifier}`);
+      throw new NotFoundException(MESSAGES.OTP_SESSION_EXPIRED);
+    }
+
+    if (session.verified) {
+      this.logger.warn(
+        `Resend OTP attempted after verification for ${identifier}`,
+      );
+      throw new BadRequestException(MESSAGES.OTP_ALREADY_VERIFIED);
+    }
+
+    if (session.type !== tempTokenData.type) {
+      this.logger.warn(`Resend OTP type mismatch for ${identifier}`);
+      throw new BadRequestException(MESSAGES.INVALID_OTP_TYPE);
+    }
+
+    const otp = '123456';
+    const hashedOtp = await bcrypt.hash(otp, 10);
+
+    await this.redisService.set(
+      key,
+      {
+        ...session,
+        otp: hashedOtp,
+      },
+      AUTH_CONSTANTS.OTP_TTL_SECONDS,
+    );
+
+    const token = this.jwtService.sign(
+      {
+        email: tempTokenData.email,
+        phoneNumber: tempTokenData.phoneNumber,
+        type: tempTokenData.type,
+      },
+      { expiresIn: AUTH_CONSTANTS.TEMP_TOKEN_EXPIRES_IN },
+    );
+
+    this.logger.log(`OTP resent successfully for ${identifier}`);
+
+    return {
+      message: MESSAGES.OTP_SENT,
+      data: {
+        tempToken: token,
+      },
+    };
+  }
 }

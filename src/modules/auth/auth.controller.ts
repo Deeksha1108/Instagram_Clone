@@ -62,7 +62,7 @@ export class AuthController {
   @Post('login')
   @UseGuards(BasicAuthGuard)
   @ApiBasicAuth('BasicAuth')
-  @ApiOperation({ summary: 'Login with email/ phone/ password' })
+  @ApiOperation({ summary: 'Login with email/phone/username and password' })
   @HttpCode(200)
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
@@ -71,11 +71,21 @@ export class AuthController {
   @Post('reset-password')
   @UseGuards(TempTokenGuard)
   @ApiBearerAuth()
+  @ApiOperation({ summary: 'Reset password using phone or email' })
   @HttpCode(200)
   resetPassword(
     @Body() dto: ResetPasswordDto,
     @Req() req: RequestWithTempToken,
   ) {
     return this.authService.resetPassword(dto, req.tempTokenData);
+  }
+
+  @Post('resend-otp')
+  @UseGuards(TempTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({summary: 'Resend OTP using temp token after initial sendOtp'})
+  @HttpCode(200)
+  resendOtp(@Req() req: RequestWithTempToken) {
+    return this.authService.resendOtp(req.tempTokenData);
   }
 }

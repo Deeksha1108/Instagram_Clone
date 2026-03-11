@@ -14,4 +14,5 @@ export const MESSAGES = {
   PASSWORD_MUST_BE_DIFFERENT: 'New password must be different from old password',
   PASSWORD_RESET_SUCCESS: 'Password reset successfully',
   OTP_ALREADY_VERIFIED: 'OTP already verified',
+  INVALID_OTP_TYPE: 'OTP type mismatch. Please use the correct flow.',
 };
