@@ -138,7 +138,7 @@ export class AuthService {
     });
     const refreshToken = this.jwtService.sign(payload, {
       secret: JWT_CONFIG.refreshSecret,
-      expiresIn: JWT_CONFIG.refreshExpiresIn, //
+      expiresIn: JWT_CONFIG.refreshExpiresIn,
     });
 
     return {
