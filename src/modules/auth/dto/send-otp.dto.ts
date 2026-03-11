@@ -1,6 +1,17 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsOptional, IsPhoneNumber, Validate } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsPhoneNumber,
+  Validate,
+} from 'class-validator';
 import { EmailOrPhoneConstraint } from 'src/common/validators/email-or-phone.validator';
+
+export enum OtpType {
+  SIGNUP = 'SIGNUP',
+  FORGOT_PASSWORD = 'FORGOT_PASSWORD',
+}
 
 export class SendOtpDto {
   @ApiProperty({ example: 'test@gmail.com', required: false })
@@ -12,6 +23,15 @@ export class SendOtpDto {
   @IsOptional()
   @IsPhoneNumber('IN')
   phone?: string;
+
+  @ApiProperty({
+    enum: OtpType,
+    enumName: 'OtpType',
+    example: OtpType.SIGNUP,
+    description: 'Purpose of OTP: SIGNUP or FORGOT_PASSWORD',
+  })
+  @IsEnum(OtpType)
+  type: OtpType;
 
   @Validate(EmailOrPhoneConstraint)
   _check?: any;

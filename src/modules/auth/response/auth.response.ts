@@ -8,5 +8,10 @@ export const MESSAGES = {
   OTP_SENT: 'OTP sent successfully',
   OTP_VERIFIED: 'OTP verified successfully',
   LOGIN_SUCCESS: 'Login successful',
-  INVALID_CREDENTIALS: 'Invalid email, phone or password',
+  INVALID_CREDENTIALS: 'Invalid credentials',
+  USER_ALREADY_EXISTS: 'User already exists',
+  USER_NOT_FOUND: 'User not found',
+  PASSWORD_MUST_BE_DIFFERENT: 'New password must be different from old password',
+  PASSWORD_RESET_SUCCESS: 'Password reset successfully',
+  OTP_ALREADY_VERIFIED: 'OTP already verified',
 };

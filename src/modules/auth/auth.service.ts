@@ -11,7 +11,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { RedisService } from 'src/shared/redis/redis.service';
 import { User } from '../user/entities/user.entity';
-import { SendOtpDto } from './dto/send-otp.dto';
+import { OtpType, SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { TempTokenData } from 'src/common/types/auth.types';
@@ -26,6 +26,7 @@ import {
   VerifyOtpResponse,
 } from './interfaces/auth-response.interface';
 import { LoginDto } from './dto/login.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -39,16 +40,39 @@ export class AuthService {
   ) {}
 
   async sendOtp(dto: SendOtpDto): Promise<ApiResponse<SendOtpResponse>> {
-    const identifier = dto.email || dto.phone;
-    if (!identifier)
-      throw new BadRequestException(MESSAGES.EMAIL_OR_PHONE_REQUIRED);
+    const identifier = this.getIdentifier(dto);
+    this.logger.log(`OTP request received for ${identifier} [${dto.type}]`);
+
+    if (dto.type === OtpType.SIGNUP) {
+      const existingUser = await this.userRepo.findOne({
+        where: dto.email ? { email: dto.email } : { phone: dto.phone },
+      });
+
+      if (existingUser) {
+        this.logger.warn(`Signup attempt with existing user: ${identifier}`);
+        throw new BadRequestException(MESSAGES.USER_ALREADY_EXISTS);
+      }
+    }
+
+    if (dto.type === OtpType.FORGOT_PASSWORD) {
+      const user = await this.userRepo.findOne({
+        where: dto.email ? { email: dto.email } : { phone: dto.phone },
+      });
+
+      if (!user) {
+        this.logger.warn(
+          `Forgot password requested for non-existing user: ${identifier}`,
+        );
+        throw new NotFoundException(MESSAGES.USER_NOT_FOUND);
+      }
+    }
 
     const otp = '123456';
     const hashedOtp = await bcrypt.hash(otp, 10);
 
     await this.redisService.set(
       `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
-      { otp: hashedOtp, verified: false },
+      { otp: hashedOtp, verified: false, type: dto.type },
       AUTH_CONSTANTS.OTP_TTL_SECONDS,
     );
 
@@ -56,7 +80,7 @@ export class AuthService {
       {
         email: dto.email,
         phoneNumber: dto.phone,
-        type: 'SIGNUP',
+        type: dto.type,
       },
       { expiresIn: AUTH_CONSTANTS.TEMP_TOKEN_EXPIRES_IN },
     );
@@ -73,21 +97,36 @@ export class AuthService {
     dto: VerifyOtpDto,
     tempTokenData: TempTokenData,
   ): Promise<ApiResponse<VerifyOtpResponse>> {
-    const identifier = tempTokenData.email || tempTokenData.phoneNumber;
+    const identifier = this.getIdentifier({
+      email: tempTokenData.email,
+      phone: tempTokenData.phoneNumber,
+    });
     const session = await this.redisService.get(
       `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
     );
 
-    if (!session) throw new NotFoundException(MESSAGES.OTP_SESSION_EXPIRED);
+    if (!session) {
+      this.logger.warn(`OTP session expired for ${identifier}`);
+      throw new NotFoundException(MESSAGES.OTP_SESSION_EXPIRED);
+    }
+
+    if (session.verified) {
+      this.logger.warn(`OTP already verified attempt for ${identifier}`);
+      throw new BadRequestException(MESSAGES.OTP_ALREADY_VERIFIED);
+    }
+
     const isMatch = await bcrypt.compare(dto.otp, session.otp);
-    if (!isMatch) throw new BadRequestException(MESSAGES.INVALID_OTP);
+    if (!isMatch) {
+      this.logger.warn(`Invalid OTP attempt for ${identifier}`);
+      throw new BadRequestException(MESSAGES.INVALID_OTP);
+    }
 
     await this.redisService.set(
       `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
       { ...session, verified: true },
       AUTH_CONSTANTS.OTP_TTL_SECONDS,
     );
-
+    this.logger.log(`OTP verified successfully for ${identifier}`);
     return {
       message: MESSAGES.OTP_VERIFIED,
       data: {
@@ -100,7 +139,10 @@ export class AuthService {
     dto: CreateProfileDto,
     tempTokenData: TempTokenData,
   ): Promise<ApiResponse<CreateProfileResponse>> {
-    const identifier = tempTokenData.email || tempTokenData.phoneNumber;
+    const identifier = this.getIdentifier({
+      email: tempTokenData.email,
+      phone: tempTokenData.phoneNumber,
+    });
     const session = await this.redisService.get(
       `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
     );
@@ -111,8 +153,10 @@ export class AuthService {
     const existingUser = await this.userRepo.findOne({
       where: { username: dto.username },
     });
-    if (existingUser) throw new BadRequestException(MESSAGES.USERNAME_TAKEN);
-
+    if (existingUser) {
+      this.logger.warn(`Username already taken: ${dto.username}`);
+      throw new BadRequestException(MESSAGES.USERNAME_TAKEN);
+    }
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     const user = this.userRepo.create({
@@ -140,7 +184,7 @@ export class AuthService {
       secret: JWT_CONFIG.refreshSecret,
       expiresIn: JWT_CONFIG.refreshExpiresIn,
     });
-
+    this.logger.log(`User profile created: ${user.id}`);
     return {
       message: MESSAGES.PROFILE_CREATED,
       data: {
@@ -190,6 +234,7 @@ export class AuthService {
     // await this.userRepo.update(user.id, {
     //   refreshToken: hashedRefreshToken,
     // });
+    this.logger.log(`User logged in: ${user.id}`);
 
     return {
       message: MESSAGES.LOGIN_SUCCESS,
@@ -199,5 +244,65 @@ export class AuthService {
         refreshToken,
       },
     };
+  }
+
+  async resetPassword(
+    dto: ResetPasswordDto,
+    tempTokenData: TempTokenData,
+  ): Promise<ApiResponse<null>> {
+    const identifier = this.getIdentifier({
+      email: tempTokenData.email,
+      phone: tempTokenData.phoneNumber,
+    });
+    const session = await this.redisService.get(
+      `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
+    );
+
+    if (!session?.verified || session.type !== OtpType.FORGOT_PASSWORD) {
+      throw new UnauthorizedException(MESSAGES.OTP_NOT_VERIFIED);
+    }
+
+    const user = await this.userRepo.findOne({
+      where: tempTokenData.email
+        ? { email: tempTokenData.email }
+        : { phone: tempTokenData.phoneNumber },
+    });
+
+    if (!user) {
+      this.logger.warn(
+        `Password reset requested for non-existing user: ${identifier}`,
+      );
+      throw new NotFoundException(MESSAGES.USER_NOT_FOUND);
+    }
+
+    const samePassword = await bcrypt.compare(dto.newPassword, user.password);
+
+    if (samePassword) {
+      this.logger.warn(`User tried resetting same password: ${identifier}`);
+      throw new BadRequestException(MESSAGES.PASSWORD_MUST_BE_DIFFERENT);
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+
+    await this.userRepo.update(user.id, {
+      password: hashedPassword,
+    });
+
+    await this.redisService.del(
+      `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
+    );
+    this.logger.log(`Password reset successful for user: ${user.id}`);
+    return {
+      message: MESSAGES.PASSWORD_RESET_SUCCESS,
+      data: null,
+    };
+  }
+
+  private getIdentifier(data: { email?: string; phone?: string }): string {
+    const identifier = data.email || data.phone;
+    if (!identifier) {
+      throw new BadRequestException(MESSAGES.EMAIL_OR_PHONE_REQUIRED);
+    }
+    return identifier;
   }
 }

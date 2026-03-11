@@ -20,6 +20,7 @@ import { TempTokenGuard } from 'src/common/guards/temp-token.guard';
 import type { RequestWithTempToken } from 'src/common/types/auth.types';
 import { BasicAuthGuard } from 'src/common/guards/basic-auth.guard';
 import { LoginDto } from './dto/login.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @ApiTags('Auth Module')
 @Controller('auth')
@@ -65,5 +66,16 @@ export class AuthController {
   @HttpCode(200)
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  @Post('reset-password')
+  @UseGuards(TempTokenGuard)
+  @ApiBearerAuth()
+  @HttpCode(200)
+  resetPassword(
+    @Body() dto: ResetPasswordDto,
+    @Req() req: RequestWithTempToken,
+  ) {
+    return this.authService.resetPassword(dto, req.tempTokenData);
   }
 }
