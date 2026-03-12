@@ -11,7 +11,7 @@ export const MESSAGES = {
   INVALID_CREDENTIALS: 'Invalid credentials',
   USER_ALREADY_EXISTS: 'User already exists',
   USER_NOT_FOUND: 'User not found',
-  PASSWORD_MUST_BE_DIFFERENT: 'New password must be different from old password',
+  PASSWORD_MUST_BE_DIFFERENT: 'Create a new password you have not used before.',
   PASSWORD_RESET_SUCCESS: 'Password reset successfully',
   OTP_ALREADY_VERIFIED: 'OTP already verified',
   INVALID_OTP_TYPE: 'OTP type mismatch. Please use the correct flow.',
@@ -20,4 +20,5 @@ export const MESSAGES = {
   INVALID_REFRESH_TOKEN: 'Invalid or expired refresh token',
   REFRESH_TOKEN_SUCCESS: 'Token refreshed successfully',
   TOO_MANY_OTP_REQUESTS: 'Too many OTP requests. Please try again later.',
+  TOO_MANY_VERIFY_OTP_ATTEMPTS: 'Too many verify OTP attempts. Please try again later.',
 };
