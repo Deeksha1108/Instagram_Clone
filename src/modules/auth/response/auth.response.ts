@@ -15,4 +15,8 @@ export const MESSAGES = {
   PASSWORD_RESET_SUCCESS: 'Password reset successfully',
   OTP_ALREADY_VERIFIED: 'OTP already verified',
   INVALID_OTP_TYPE: 'OTP type mismatch. Please use the correct flow.',
+  AUTH_HEADER_MISSING: 'Authorization header missing or malformed',
+  INVALID_TOKEN: 'Invalid or expired token',
+  INVALID_REFRESH_TOKEN: 'Invalid or expired refresh token',
+  REFRESH_TOKEN_SUCCESS: 'Token refreshed successfully',
 };

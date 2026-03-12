@@ -21,6 +21,7 @@ import type { RequestWithTempToken } from 'src/common/types/auth.types';
 import { BasicAuthGuard } from 'src/common/guards/basic-auth.guard';
 import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 
 @ApiTags('Auth Module')
 @Controller('auth')
@@ -87,5 +88,14 @@ export class AuthController {
   @HttpCode(200)
   resendOtp(@Req() req: RequestWithTempToken) {
     return this.authService.resendOtp(req.tempTokenData);
+  }
+
+  @Post('refresh-token')
+  @UseGuards(BasicAuthGuard)
+  @ApiBasicAuth('BasicAuth')
+  @ApiOperation({ summary: 'Refresh access token using refresh token' })
+  @HttpCode(200)
+  refreshToken(@Body() dto: RefreshTokenDto) {
+    return this.authService.refreshToken(dto);
   }
 }

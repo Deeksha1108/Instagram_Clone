@@ -22,12 +22,14 @@ import {
   ApiResponse,
   CreateProfileResponse,
   LoginResponse,
+  RefreshTokenResponse,
   SendOtpResponse,
   VerifyOtpResponse,
 } from './interfaces/auth-response.interface';
 import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MailerService } from 'src/shared/mailer/mailer.service';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 
 @Injectable()
 export class AuthService {
@@ -195,6 +197,14 @@ export class AuthService {
       secret: JWT_CONFIG.refreshSecret,
       expiresIn: JWT_CONFIG.refreshExpiresIn,
     });
+
+    const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+
+    await this.redisService.set(
+      `refresh_token:${user.id}`,
+      hashedRefreshToken,
+      JWT_CONFIG.refreshExpiresIn,
+    );
     this.logger.log(`User profile created: ${user.id}`);
     return {
       message: MESSAGES.PROFILE_CREATED,
@@ -242,9 +252,11 @@ export class AuthService {
 
     const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
 
-    // await this.userRepo.update(user.id, {
-    //   refreshToken: hashedRefreshToken,
-    // });
+    await this.redisService.set(
+      `refresh_token:${user.id}`,
+      hashedRefreshToken,
+      JWT_CONFIG.refreshExpiresIn,
+    );
     this.logger.log(`User logged in: ${user.id}`);
 
     return {
@@ -253,6 +265,65 @@ export class AuthService {
         userId: user.id,
         accessToken,
         refreshToken,
+      },
+    };
+  }
+
+  async refreshToken(
+    dto: RefreshTokenDto,
+  ): Promise<ApiResponse<RefreshTokenResponse>> {
+    const payload = this.jwtService.verify<{
+      userId: string;
+      username: string;
+    }>(dto.refreshToken, {
+      secret: JWT_CONFIG.refreshSecret,
+    });
+
+    const storedHashedToken = await this.redisService.get(
+      `refresh_token:${payload.userId}`,
+    );
+
+    if (!storedHashedToken) {
+      throw new UnauthorizedException(MESSAGES.INVALID_REFRESH_TOKEN);
+    }
+
+    const isValid = await bcrypt.compare(dto.refreshToken, storedHashedToken);
+
+    if (!isValid) {
+      throw new UnauthorizedException(MESSAGES.INVALID_REFRESH_TOKEN);
+    }
+
+    const newAccessToken = this.jwtService.sign(
+      { userId: payload.userId, username: payload.username },
+      {
+        secret: JWT_CONFIG.secret,
+        expiresIn: JWT_CONFIG.expiresIn,
+      },
+    );
+
+    const newRefreshToken = this.jwtService.sign(
+      { userId: payload.userId, username: payload.username },
+      {
+        secret: JWT_CONFIG.refreshSecret,
+        expiresIn: JWT_CONFIG.refreshExpiresIn,
+      },
+    );
+
+    const newHashedRefreshToken = await bcrypt.hash(newRefreshToken, 10);
+
+    await this.redisService.set(
+      `refresh_token:${payload.userId}`,
+      newHashedRefreshToken,
+      JWT_CONFIG.refreshExpiresIn,
+    );
+
+    this.logger.log(`Refresh token rotated for user: ${payload.userId}`);
+
+    return {
+      message: MESSAGES.REFRESH_TOKEN_SUCCESS,
+      data: {
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
       },
     };
   }
