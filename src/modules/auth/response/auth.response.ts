@@ -19,4 +19,5 @@ export const MESSAGES = {
   INVALID_TOKEN: 'Invalid or expired token',
   INVALID_REFRESH_TOKEN: 'Invalid or expired refresh token',
   REFRESH_TOKEN_SUCCESS: 'Token refreshed successfully',
+  TOO_MANY_OTP_REQUESTS: 'Too many OTP requests. Please try again later.',
 };

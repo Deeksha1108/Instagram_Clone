@@ -7,11 +7,7 @@ import {
   Validate,
 } from 'class-validator';
 import { EmailOrPhoneConstraint } from 'src/common/validators/email-or-phone.validator';
-
-export enum OtpType {
-  SIGNUP = 'SIGNUP',
-  FORGOT_PASSWORD = 'FORGOT_PASSWORD',
-}
+import { OtpType } from 'src/common/enum/otp-type.enum';
 
 export class SendOtpDto {
   @ApiProperty({ example: 'test@gmail.com', required: false })

@@ -4,6 +4,7 @@ import {
   NotFoundException,
   UnauthorizedException,
   Logger,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -11,7 +12,8 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { RedisService } from 'src/shared/redis/redis.service';
 import { User } from '../user/entities/user.entity';
-import { OtpType, SendOtpDto } from './dto/send-otp.dto';
+import { OtpType } from 'src/common/enum/otp-type.enum';
+import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { TempTokenData } from 'src/common/types/auth.types';
@@ -30,6 +32,9 @@ import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MailerService } from 'src/shared/mailer/mailer.service';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { AttemptStatus, AttemptType } from 'src/common/enum/auth-attempt.enum';
+import { AuthAttempt } from '../user/entities/auth_attempts.entity';
+import { COMMON_CONFIG, NODE_ENV_TYPE } from 'src/config/common.config';
 
 @Injectable()
 export class AuthService {
@@ -37,16 +42,37 @@ export class AuthService {
 
   constructor(
     private readonly redisService: RedisService,
+
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+
+    @InjectRepository(AuthAttempt)
+    private readonly authAttemptRepo: Repository<AuthAttempt>,
+
     private readonly jwtService: JwtService,
     private readonly mailerService: MailerService,
   ) {}
 
+  /**
+   * Sends OTP for signup or forgot password.
+   *
+   * Flow:
+   * 1. Validate user existence depending on OTP type
+   * 2. Generate OTP (email/phone)
+   * 3. Store hashed OTP in Redis with TTL
+   * 4. Return temporary token for OTP verification
+   * 5. Applies rate limiting using Redis to prevent OTP spam attacks.
+   */
   async sendOtp(dto: SendOtpDto): Promise<ApiResponse<SendOtpResponse>> {
     const identifier = this.getIdentifier(dto);
+
+    // Redis rate limit protection
+    await this.checkOtpRateLimit(identifier);
     this.logger.log(`OTP request received for ${identifier} [${dto.type}]`);
 
+    /**
+     * Signup validation
+     */
     if (dto.type === OtpType.SIGNUP) {
       const existingUser = await this.userRepo.findOne({
         where: dto.email ? { email: dto.email } : { phone: dto.phone },
@@ -54,10 +80,19 @@ export class AuthService {
 
       if (existingUser) {
         this.logger.warn(`Signup attempt with existing user: ${identifier}`);
+        await this.authAttemptRepo.save({
+          email: dto.email,
+          phone: dto.phone,
+          attemptType: AttemptType.SIGNUP,
+          status: AttemptStatus.USER_ALREADY_EXISTS,
+        });
         throw new BadRequestException(MESSAGES.USER_ALREADY_EXISTS);
       }
     }
 
+    /**
+     * Forgot password validation
+     */
     if (dto.type === OtpType.FORGOT_PASSWORD) {
       const user = await this.userRepo.findOne({
         where: dto.email ? { email: dto.email } : { phone: dto.phone },
@@ -67,25 +102,51 @@ export class AuthService {
         this.logger.warn(
           `Forgot password requested for non-existing user: ${identifier}`,
         );
+        await this.authAttemptRepo.save({
+          email: dto.email,
+          phone: dto.phone,
+          attemptType: AttemptType.FORGOT_PASSWORD,
+          status: AttemptStatus.INVALID_USER,
+        });
         throw new NotFoundException(MESSAGES.USER_NOT_FOUND);
       }
     }
 
+    /**
+     * OTP bypass allowed only in dev or qa environment
+     */
+    const bypassAllowed = this.isOtpBypassAllowed();
+
     let otp: string;
-    if (dto.phone) {
-      otp = '123456';
-    } else if (dto.email) {
-      otp = this.generateRandomOtp(); // yha se authservice k helper function ko call kr rhe h or random otp generate krenge
-      await this.mailerService.sendOtpEmail(dto.email, otp); // nodemailer call
+
+    if (bypassAllowed) {
+      otp = COMMON_CONFIG.otp.bypassCode;
+      this.logger.warn(`OTP bypass active for ${identifier}`);
     } else {
-      throw new BadRequestException(MESSAGES.EMAIL_OR_PHONE_REQUIRED);
+      otp = this.generateRandomOtp();
+
+      if (dto.email) {
+        await this.mailerService.sendOtpEmail(dto.email, otp);
+      }
+
+      if (dto.phone) {
+        // SMS integration here
+      }
     }
 
     const hashedOtp = await bcrypt.hash(otp, 10);
 
+    /**
+     * Store OTP session in Redis
+     */
     await this.redisService.set(
       `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
-      { otp: hashedOtp, verified: false, type: dto.type },
+      {
+        otp: hashedOtp,
+        verified: false,
+        type: dto.type,
+        verifyAttempts: 0,
+      },
       AUTH_CONSTANTS.OTP_TTL_SECONDS,
     );
 
@@ -106,6 +167,10 @@ export class AuthService {
     };
   }
 
+  /**
+   * Verifies OTP entered by the user.
+   * Implements brute force protection using verify attempt count.
+   */
   async verifyOtp(
     dto: VerifyOtpDto,
     tempTokenData: TempTokenData,
@@ -127,10 +192,35 @@ export class AuthService {
       this.logger.warn(`OTP already verified attempt for ${identifier}`);
       throw new BadRequestException(MESSAGES.OTP_ALREADY_VERIFIED);
     }
+    /**
+     * Brute force protection
+     */
+    if (session.verifyAttempts >= COMMON_CONFIG.otp.maxVerifyAttempts) {
+      this.logger.warn(`OTP verify attempts exceeded for ${identifier}`);
+      throw new ForbiddenException(MESSAGES.TOO_MANY_OTP_REQUESTS);
+    }
 
-    const isMatch = await bcrypt.compare(dto.otp, session.otp);
+    const bypassAllowed = this.isOtpBypassAllowed();
+
+    let isMatch = false;
+
+    if (bypassAllowed && dto.otp === COMMON_CONFIG.otp.bypassCode) {
+      isMatch = true;
+    } else {
+      isMatch = await bcrypt.compare(dto.otp, session.otp);
+    }
     if (!isMatch) {
+      await this.redisService.set(
+        `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
+        {
+          ...session,
+          verifyAttempts: session.verifyAttempts + 1,
+        },
+        AUTH_CONSTANTS.OTP_TTL_SECONDS,
+      );
+
       this.logger.warn(`Invalid OTP attempt for ${identifier}`);
+
       throw new BadRequestException(MESSAGES.INVALID_OTP);
     }
 
@@ -225,22 +315,51 @@ export class AuthService {
     };
   }
 
+  /**
+   * Authenticates user using email/phone/username and password.
+   *
+   * Flow:
+   * 1. Fetch user
+   * 2. Validate password
+   * 3. Generate access + refresh tokens
+   * 4. Store refresh token hash in Redis
+   */
   async login(dto: LoginDto): Promise<ApiResponse<LoginResponse>> {
-    const user = await this.userRepo.findOne({
-      where: dto.email
-        ? { email: dto.email }
-        : dto.phone
-          ? { phone: dto.phone }
-          : { username: dto.username },
-    });
+    const query = this.userRepo.createQueryBuilder('user');
 
-    if (!user || !user.isVerified) {
+    if (dto.email) {
+      query.where('user.email = :email', { email: dto.email });
+    } else if (dto.phone) {
+      query.where('user.phone = :phone', { phone: dto.phone });
+    } else {
+      query.where('user.username = :username', { username: dto.username });
+    }
+    const user = await query.addSelect('user.password').getOne();
+
+    if (!user) {
+      await this.authAttemptRepo.save({
+        email: dto.email,
+        phone: dto.phone,
+        attemptType: AttemptType.LOGIN,
+        status: AttemptStatus.INVALID_USER,
+      });
+
+      throw new UnauthorizedException(MESSAGES.INVALID_CREDENTIALS);
+    }
+
+    if (!user.isVerified) {
       throw new UnauthorizedException(MESSAGES.INVALID_CREDENTIALS);
     }
 
     const passwordMatch = await bcrypt.compare(dto.password, user.password);
 
     if (!passwordMatch) {
+      await this.authAttemptRepo.save({
+        email: dto.email,
+        phone: dto.phone,
+        attemptType: AttemptType.LOGIN,
+        status: AttemptStatus.WRONG_PASSWORD,
+      });
       throw new UnauthorizedException(MESSAGES.INVALID_CREDENTIALS);
     }
 
@@ -278,6 +397,15 @@ export class AuthService {
     };
   }
 
+  /**
+   * Generates a new access token using a valid refresh token.
+   *
+   * Flow:
+   * 1. Verify refresh token
+   * 2. Compare with stored hash in Redis
+   * 3. Rotate refresh token
+   * 4. Return new tokens
+   */
   async refreshToken(
     dto: RefreshTokenDto,
   ): Promise<ApiResponse<RefreshTokenResponse>> {
@@ -389,6 +517,10 @@ export class AuthService {
     };
   }
 
+  /**
+   * Resends OTP to the user if the previous OTP session is still valid.
+   * Applies rate limiting and respects OTP bypass rules for dev/qa environments.
+   */
   async resendOtp(
     tempTokenData: TempTokenData,
   ): Promise<ApiResponse<SendOtpResponse>> {
@@ -396,7 +528,8 @@ export class AuthService {
       email: tempTokenData.email,
       phone: tempTokenData.phoneNumber,
     });
-
+    // Rate limit protection
+    await this.checkOtpRateLimit(identifier);
     const key = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`;
     const session = await this.redisService.get(key);
 
@@ -417,18 +550,46 @@ export class AuthService {
       throw new BadRequestException(MESSAGES.INVALID_OTP_TYPE);
     }
 
-    const otp = '123456';
+    /**
+     * Allow OTP bypass only in development or QA environment
+     */
+    const bypassAllowed = this.isOtpBypassAllowed();
+
+    let otp: string;
+
+    if (bypassAllowed) {
+      otp = COMMON_CONFIG.otp.bypassCode;
+      this.logger.warn(`OTP bypass active during resend for ${identifier}`);
+    } else {
+      otp = this.generateRandomOtp();
+
+      if (tempTokenData.email) {
+        await this.mailerService.sendOtpEmail(tempTokenData.email, otp);
+      }
+
+      if (tempTokenData.phoneNumber) {
+        // Future SMS integration
+      }
+    }
+
     const hashedOtp = await bcrypt.hash(otp, 10);
 
+    /**
+     * Update OTP session in Redis and reset verify attempts
+     */
     await this.redisService.set(
       key,
       {
         ...session,
         otp: hashedOtp,
+        verifyAttempts: 0,
       },
       AUTH_CONSTANTS.OTP_TTL_SECONDS,
     );
 
+    /**
+     * Generate new temporary token
+     */
     const token = this.jwtService.sign(
       {
         email: tempTokenData.email,
@@ -459,5 +620,29 @@ export class AuthService {
 
   private generateRandomOtp(): string {
     return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  private async checkOtpRateLimit(identifier: string): Promise<void> {
+    const key = `otp_rate_limit:${identifier}`;
+
+    const attempts = await this.redisService.get(key);
+
+    if (attempts && Number(attempts) >= COMMON_CONFIG.otp.rateLimitMax) {
+      this.logger.warn(`OTP rate limit exceeded for ${identifier}`);
+      throw new ForbiddenException(MESSAGES.TOO_MANY_OTP_REQUESTS);
+    }
+
+    if (!attempts) {
+      await this.redisService.set(key, 1, COMMON_CONFIG.otp.rateLimitWindow);
+    } else {
+      await this.redisService.incr(key);
+    }
+  }
+
+  private isOtpBypassAllowed() {
+    return (
+      COMMON_CONFIG.otp.bypassEnabled &&
+      [NODE_ENV_TYPE.DEV, NODE_ENV_TYPE.QA].includes(COMMON_CONFIG.nodeEnv)
+    );
   }
 }

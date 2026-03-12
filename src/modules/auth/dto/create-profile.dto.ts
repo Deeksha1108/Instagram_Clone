@@ -8,12 +8,7 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-
-export enum Gender {
-  MALE = 'male',
-  FEMALE = 'female',
-  OTHER = 'other',
-}
+import { Gender } from 'src/common/enum/enum.common';
 
 export class CreateProfileDto {
   @ApiProperty({ example: 'Deeksha Singh' })
