@@ -3,7 +3,7 @@ import { IsString, MaxLength, MinLength } from "class-validator";
 
 export class ResetPasswordDto {
 
-  @ApiProperty({ example: 'newpassword123' })
+  @ApiProperty({ example: 'pass123' })
   @IsString()
   @MinLength(6)
   @MaxLength(10)

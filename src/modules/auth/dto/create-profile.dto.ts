@@ -34,7 +34,7 @@ export class CreateProfileDto {
   @IsEnum(Gender, { message: 'Gender must be male, female or other' })
   gender: Gender;
 
-  @ApiProperty({ example: 'password123' })
+  @ApiProperty({ example: 'Pass@123' })
   @IsString()
   @MinLength(6, { message: 'Password must be at least 6 characters long' })
   @MaxLength(10, { message: 'Password must not exceed 10 characters' })

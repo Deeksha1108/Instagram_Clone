@@ -27,6 +27,7 @@ import {
 } from './interfaces/auth-response.interface';
 import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { MailerService } from 'src/shared/mailer/mailer.service';
 
 @Injectable()
 export class AuthService {
@@ -37,6 +38,7 @@ export class AuthService {
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     private readonly jwtService: JwtService,
+    private readonly mailerService: MailerService,
   ) {}
 
   async sendOtp(dto: SendOtpDto): Promise<ApiResponse<SendOtpResponse>> {
@@ -67,7 +69,16 @@ export class AuthService {
       }
     }
 
-    const otp = '123456';
+    let otp: string;
+    if (dto.phone) {
+      otp = '123456';
+    } else if (dto.email) {
+      otp = this.generateRandomOtp(); // yha se authservice k helper function ko call kr rhe h or random otp generate krenge
+      await this.mailerService.sendOtpEmail(dto.email, otp); // nodemailer call
+    } else {
+      throw new BadRequestException(MESSAGES.EMAIL_OR_PHONE_REQUIRED);
+    }
+
     const hashedOtp = await bcrypt.hash(otp, 10);
 
     await this.redisService.set(
@@ -298,14 +309,6 @@ export class AuthService {
     };
   }
 
-  private getIdentifier(data: { email?: string; phone?: string }): string {
-    const identifier = data.email || data.phone;
-    if (!identifier) {
-      throw new BadRequestException(MESSAGES.EMAIL_OR_PHONE_REQUIRED);
-    }
-    return identifier;
-  }
-
   async resendOtp(
     tempTokenData: TempTokenData,
   ): Promise<ApiResponse<SendOtpResponse>> {
@@ -363,5 +366,18 @@ export class AuthService {
         tempToken: token,
       },
     };
+  }
+
+  // Helper functions
+  private getIdentifier(data: { email?: string; phone?: string }): string {
+    const identifier = data.email || data.phone;
+    if (!identifier) {
+      throw new BadRequestException(MESSAGES.EMAIL_OR_PHONE_REQUIRED);
+    }
+    return identifier;
+  }
+
+  private generateRandomOtp(): string {
+    return Math.floor(100000 + Math.random() * 900000).toString();
   }
 }

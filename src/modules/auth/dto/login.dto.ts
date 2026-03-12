@@ -24,7 +24,7 @@ export class LoginDto {
   @IsString()
   username?: string;
 
-  @ApiProperty({ example: 'password123' })
+  @ApiProperty({ example: 'Pass@123' })
   @IsString()
   password: string;
 

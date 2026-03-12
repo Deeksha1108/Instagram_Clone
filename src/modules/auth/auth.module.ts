@@ -6,11 +6,13 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { TempTokenGuard } from 'src/common/guards/temp-token.guard';
 import { RedisModule } from 'src/shared/redis/redis.module';
+import { MailerModule } from 'src/shared/mailer/mailer.module';
 import { User } from '../user/entities/user.entity';
 
 @Module({
   imports: [
     RedisModule,
+    MailerModule,
     TypeOrmModule.forFeature([User]),
     JwtModule.registerAsync({
       inject: [ConfigService],
