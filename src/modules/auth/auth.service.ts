@@ -12,7 +12,6 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { RedisService } from 'src/shared/redis/redis.service';
 import { User } from '../user/entities/user.entity';
-import { OtpType } from 'src/common/enum/otp-type.enum';
 import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { CreateProfileDto } from './dto/create-profile.dto';
@@ -32,9 +31,9 @@ import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MailerService } from 'src/shared/mailer/mailer.service';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
-import { AttemptStatus, AttemptType } from 'src/common/enum/auth-attempt.enum';
 import { AuthAttempt } from '../user/entities/auth_attempts.entity';
 import { COMMON_CONFIG, NODE_ENV_TYPE } from 'src/config/common.config';
+import { AttemptStatus, AttemptType, OtpType } from 'src/common/enum/enum.common';
 
 @Injectable()
 export class AuthService {
@@ -130,7 +129,7 @@ export class AuthService {
       }
 
       if (dto.phone) {
-        // SMS integration here
+        // SMS integration here for future
       }
     }
 
@@ -197,7 +196,7 @@ export class AuthService {
      */
     if (session.verifyAttempts >= COMMON_CONFIG.otp.maxVerifyAttempts) {
       this.logger.warn(`OTP verify attempts exceeded for ${identifier}`);
-      throw new ForbiddenException(MESSAGES.TOO_MANY_OTP_REQUESTS);
+      throw new ForbiddenException(MESSAGES.TOO_MANY_VERIFY_OTP_ATTEMPTS);
     }
 
     const bypassAllowed = this.isOtpBypassAllowed();
