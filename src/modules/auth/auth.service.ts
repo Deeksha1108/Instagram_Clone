@@ -160,8 +160,17 @@ export class AuthService {
       `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
     );
 
-    if (!session?.verified)
+    if (!session) {
+      throw new NotFoundException(MESSAGES.OTP_SESSION_EXPIRED);
+    }
+
+    if (session.type === OtpType.FORGOT_PASSWORD) {
+      throw new BadRequestException(MESSAGES.INVALID_OTP_TYPE);
+    }
+
+    if (!session.verified) {
       throw new UnauthorizedException(MESSAGES.OTP_NOT_VERIFIED);
+    }
 
     const existingUser = await this.userRepo.findOne({
       where: { username: dto.username },
