@@ -9,12 +9,13 @@ import { RedisModule } from 'src/shared/redis/redis.module';
 import { MailerModule } from 'src/shared/mailer/mailer.module';
 import { User } from '../user/entities/user.entity';
 import { AuthAttempt } from '../user/entities/auth_attempts.entity';
+import { UserSession } from '../user/entities/user_sessions.entity';
 
 @Module({
   imports: [
     RedisModule,
     MailerModule,
-    TypeOrmModule.forFeature([User, AuthAttempt]),
+    TypeOrmModule.forFeature([User, AuthAttempt, UserSession]),
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

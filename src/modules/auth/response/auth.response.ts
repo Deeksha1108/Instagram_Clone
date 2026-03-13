@@ -8,6 +8,7 @@ export const MESSAGES = {
   OTP_SENT: 'OTP sent successfully',
   OTP_VERIFIED: 'OTP verified successfully',
   LOGIN_SUCCESS: 'Login successful',
+  LOGOUT_SUCCESS: 'Logout successful', 
   INVALID_CREDENTIALS: 'Invalid credentials',
   USER_ALREADY_EXISTS: 'User already exists',
   USER_NOT_FOUND: 'User not found',

@@ -34,6 +34,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { AuthAttempt } from '../user/entities/auth_attempts.entity';
 import { COMMON_CONFIG, NODE_ENV_TYPE } from 'src/config/common.config';
 import { AttemptStatus, AttemptType, OtpType } from 'src/common/enum/enum.common';
+import { UserSession } from '../user/entities/user_sessions.entity';
 
 @Injectable()
 export class AuthService {
@@ -47,6 +48,9 @@ export class AuthService {
 
     @InjectRepository(AuthAttempt)
     private readonly authAttemptRepo: Repository<AuthAttempt>,
+
+    @InjectRepository(UserSession)
+    private readonly userSessionRepo: Repository<UserSession>,
 
     private readonly jwtService: JwtService,
     private readonly mailerService: MailerService,
@@ -167,8 +171,9 @@ export class AuthService {
   }
 
   /**
-   * Verifies OTP entered by the user.
-   * Implements brute force protection using verify attempt count.
+   * Verify OTP for given identifier (email/phone).
+   * - Protects against brute force by tracking verifyAttempts.
+   * - Marks session as verified in Redis on success.
    */
   async verifyOtp(
     dto: VerifyOtpDto,
@@ -296,11 +301,11 @@ export class AuthService {
       expiresIn: JWT_CONFIG.refreshExpiresIn,
     });
 
-    const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+    // const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
 
     await this.redisService.set(
       `refresh_token:${user.id}`,
-      hashedRefreshToken,
+      refreshToken,
       JWT_CONFIG.refreshExpiresIn,
     );
     this.logger.log(`User profile created: ${user.id}`);
@@ -377,11 +382,34 @@ export class AuthService {
       expiresIn: JWT_CONFIG.refreshExpiresIn,
     });
 
-    const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+    // const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+
+    const existingSession = await this.userSessionRepo.findOne({
+      where: { userId: user.id, isActive: true },
+    });
+
+    // deactivate old session and refresh token from Redis
+    if (existingSession) {
+      existingSession.isActive = false;
+      await this.userSessionRepo.save(existingSession);
+
+      await this.redisService.del(`refresh_token:${user.id}`);
+    }
+
+    // create new session metadata in DB
+    const newSession = this.userSessionRepo.create({
+      userId: user.id,
+      loginAt: new Date(),
+      expiresAt: new Date(Date.now() + JWT_CONFIG.refreshExpiresIn * 1000),
+      device: 'mobile',
+      isActive: true,
+    });
+
+    await this.userSessionRepo.save(newSession);
 
     await this.redisService.set(
       `refresh_token:${user.id}`,
-      hashedRefreshToken,
+      refreshToken,
       JWT_CONFIG.refreshExpiresIn,
     );
     this.logger.log(`User logged in: ${user.id}`);
@@ -423,11 +451,12 @@ export class AuthService {
       throw new UnauthorizedException(MESSAGES.INVALID_REFRESH_TOKEN);
     }
 
-    const isValid = await bcrypt.compare(dto.refreshToken, storedHashedToken);
+    const isValid = dto.refreshToken === storedHashedToken;
 
     if (!isValid) {
       throw new UnauthorizedException(MESSAGES.INVALID_REFRESH_TOKEN);
     }
+    await this.redisService.del(`refresh_token:${payload.userId}`);
 
     const newAccessToken = this.jwtService.sign(
       { userId: payload.userId, username: payload.username },
@@ -445,12 +474,17 @@ export class AuthService {
       },
     );
 
-    const newHashedRefreshToken = await bcrypt.hash(newRefreshToken, 10);
+    // const newHashedRefreshToken = await bcrypt.hash(newRefreshToken, 10);
 
     await this.redisService.set(
       `refresh_token:${payload.userId}`,
-      newHashedRefreshToken,
+      newRefreshToken,
       JWT_CONFIG.refreshExpiresIn,
+    );
+
+    await this.userSessionRepo.update(
+      { userId: payload.userId, isActive: true },
+      { expiresAt: new Date(Date.now() + JWT_CONFIG.refreshExpiresIn * 1000) },
     );
 
     this.logger.log(`Refresh token rotated for user: ${payload.userId}`);
@@ -606,6 +640,21 @@ export class AuthService {
         tempToken: token,
       },
     };
+  }
+
+  /**
+   * deactivate session in DB
+   * delete refresh token from Redis
+   */
+  async logout(userId: string): Promise<ApiResponse<null>> {
+    await this.userSessionRepo.update(
+      { userId, isActive: true },
+      { isActive: false },
+    );
+
+    await this.redisService.del(`refresh_token:${userId}`);
+
+    return { message: MESSAGES.LOGOUT_SUCCESS, data: null };
   }
 
   // Helper functions

@@ -22,6 +22,8 @@ import { BasicAuthGuard } from 'src/common/guards/basic-auth.guard';
 import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { UserId } from 'src/common/decorators/current-user.decorator';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
 @ApiTags('Auth Module')
 @Controller('auth')
@@ -97,5 +99,14 @@ export class AuthController {
   @HttpCode(200)
   refreshToken(@Body() dto: RefreshTokenDto) {
     return this.authService.refreshToken(dto);
+  }
+
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Logout user' })
+  @HttpCode(200)
+  logout(@UserId() userId: string) {
+    return this.authService.logout(userId);
   }
 }
