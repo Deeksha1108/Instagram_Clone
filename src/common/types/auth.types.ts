@@ -9,3 +9,9 @@ export interface TempTokenData {
 export interface RequestWithTempToken extends Request {
   tempTokenData: TempTokenData;
 }
+
+export interface JwtPayload {
+  userId: string;
+  username: string;
+  sessionId: string;
+}

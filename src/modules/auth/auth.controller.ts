@@ -22,6 +22,8 @@ import { BasicAuthGuard } from 'src/common/guards/basic-auth.guard';
 import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 
 @ApiTags('Auth Module')
 @Controller('auth')
@@ -97,5 +99,23 @@ export class AuthController {
   @HttpCode(200)
   refreshToken(@Body() dto: RefreshTokenDto) {
     return this.authService.refreshToken(dto);
+  }
+
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Logout current device' })
+  @HttpCode(200)
+  logout(@CurrentUser('sessionId') sessionId: string) {
+    return this.authService.logout(sessionId);
+  }
+
+  @Post('logout-all')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Logout user from all devices' })
+  @HttpCode(200)
+  logoutAll(@CurrentUser('userId') userId: string) {
+    return this.authService.logoutAll(userId);
   }
 }
