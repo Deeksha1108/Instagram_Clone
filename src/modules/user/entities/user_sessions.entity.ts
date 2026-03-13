@@ -12,7 +12,11 @@ export class UserSession extends BaseEntity {
   @Column()
   userId: string;
 
-  @Column({ default: 'mobile' })
+  @Index()
+  @Column({ unique: true })
+  sessionId: string;
+
+  @Column({ nullable: true })
   device: string;
 
   @Column({ type: 'timestamp' })
