@@ -1,4 +1,4 @@
-export const MESSAGES = {
+export const AUTH_MESSAGES = {
   EMAIL_OR_PHONE_REQUIRED: 'Email or phone is required',
   INVALID_OTP: 'Invalid OTP',
   OTP_SESSION_EXPIRED: 'OTP session not found or expired',
