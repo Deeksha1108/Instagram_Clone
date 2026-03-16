@@ -26,5 +26,6 @@ import { UserSession } from '../user/entities/user_sessions.entity';
   ],
   controllers: [AuthController],
   providers: [AuthService, TempTokenGuard],
+  exports: [JwtModule],
 })
 export class AuthModule {}

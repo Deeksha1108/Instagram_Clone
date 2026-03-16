@@ -21,7 +21,6 @@ import {
   AUTH_PROVIDERS,
   REDIS_KEYS,
 } from 'src/common/constants/constants';
-import { MESSAGES } from './response/auth.response';
 import { JWT_CONFIG } from 'src/config/jwt.config';
 import {
   ApiResponse,
@@ -37,10 +36,15 @@ import { MailerService } from 'src/shared/mailer/mailer.service';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { AuthAttempt } from '../user/entities/auth_attempts.entity';
 import { COMMON_CONFIG, NODE_ENV_TYPE } from 'src/config/common.config';
-import { AttemptStatus, AttemptType, OtpType } from 'src/common/enum/enum.common';
+import {
+  AttemptStatus,
+  AttemptType,
+  OtpType,
+} from 'src/common/enum/enum.common';
 import { UserSession } from '../user/entities/user_sessions.entity';
 import { v4 as uuidv4 } from 'uuid';
 import { FacebookLoginDto } from './dto/facebook-login.dto';
+import { AUTH_MESSAGES } from './response/auth.response';
 
 @Injectable()
 export class AuthService {
@@ -89,7 +93,7 @@ export class AuthService {
           attemptType: AttemptType.SIGNUP,
           status: AttemptStatus.USER_ALREADY_EXISTS,
         });
-        throw new BadRequestException(MESSAGES.USER_ALREADY_EXISTS);
+        throw new BadRequestException(AUTH_MESSAGES.USER_ALREADY_EXISTS);
       }
     }
 
@@ -111,7 +115,7 @@ export class AuthService {
           attemptType: AttemptType.FORGOT_PASSWORD,
           status: AttemptStatus.INVALID_USER,
         });
-        throw new NotFoundException(MESSAGES.USER_NOT_FOUND);
+        throw new NotFoundException(AUTH_MESSAGES.USER_NOT_FOUND);
       }
     }
 
@@ -163,7 +167,7 @@ export class AuthService {
     );
 
     return {
-      message: MESSAGES.OTP_SENT,
+      message: AUTH_MESSAGES.OTP_SENT,
       data: {
         tempToken: token,
       },
@@ -188,19 +192,19 @@ export class AuthService {
 
     if (!session) {
       this.logger.warn(`OTP session expired for ${identifier}`);
-      throw new NotFoundException(MESSAGES.OTP_SESSION_EXPIRED);
+      throw new NotFoundException(AUTH_MESSAGES.OTP_SESSION_EXPIRED);
     }
 
     if (session.verified) {
       this.logger.warn(`OTP already verified attempt for ${identifier}`);
-      throw new BadRequestException(MESSAGES.OTP_ALREADY_VERIFIED);
+      throw new BadRequestException(AUTH_MESSAGES.OTP_ALREADY_VERIFIED);
     }
     /**
      * Brute force protection
      */
     if (session.verifyAttempts >= COMMON_CONFIG.otp.maxVerifyAttempts) {
       this.logger.warn(`OTP verify attempts exceeded for ${identifier}`);
-      throw new ForbiddenException(MESSAGES.TOO_MANY_VERIFY_OTP_ATTEMPTS);
+      throw new ForbiddenException(AUTH_MESSAGES.TOO_MANY_VERIFY_OTP_ATTEMPTS);
     }
 
     const bypassAllowed = this.isOtpBypassAllowed();
@@ -224,7 +228,7 @@ export class AuthService {
 
       this.logger.warn(`Invalid OTP attempt for ${identifier}`);
 
-      throw new BadRequestException(MESSAGES.INVALID_OTP);
+      throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP);
     }
 
     await this.redisService.set(
@@ -234,7 +238,7 @@ export class AuthService {
     );
     this.logger.log(`OTP verified successfully for ${identifier}`);
     return {
-      message: MESSAGES.OTP_VERIFIED,
+      message: AUTH_MESSAGES.OTP_VERIFIED,
       data: {
         verified: true,
       },
@@ -258,15 +262,15 @@ export class AuthService {
     );
 
     if (!otpSsession) {
-      throw new NotFoundException(MESSAGES.OTP_SESSION_EXPIRED);
+      throw new NotFoundException(AUTH_MESSAGES.OTP_SESSION_EXPIRED);
     }
 
     if (otpSsession.type === OtpType.FORGOT_PASSWORD) {
-      throw new BadRequestException(MESSAGES.INVALID_OTP_TYPE);
+      throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP_TYPE);
     }
 
     if (!otpSsession.verified) {
-      throw new UnauthorizedException(MESSAGES.OTP_NOT_VERIFIED);
+      throw new UnauthorizedException(AUTH_MESSAGES.OTP_NOT_VERIFIED);
     }
 
     const existingUser = await this.userRepo.findOne({
@@ -274,7 +278,7 @@ export class AuthService {
     });
     if (existingUser) {
       this.logger.warn(`Username already taken: ${dto.username}`);
-      throw new BadRequestException(MESSAGES.USERNAME_TAKEN);
+      throw new BadRequestException(AUTH_MESSAGES.USERNAME_TAKEN);
     }
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
@@ -301,7 +305,7 @@ export class AuthService {
     );
     this.logger.log(`User profile created: ${user.id}`);
     return {
-      message: MESSAGES.PROFILE_CREATED,
+      message: AUTH_MESSAGES.PROFILE_CREATED,
       data: session,
     };
   }
@@ -309,7 +313,10 @@ export class AuthService {
   /**
    * Authenticates a user with email/phone/username + password and returns auth tokens.
    */
-  async login(dto: LoginDto,device: string): Promise<ApiResponse<LoginResponse>> {
+  async login(
+    dto: LoginDto,
+    device: string,
+  ): Promise<ApiResponse<LoginResponse>> {
     const query = this.userRepo.createQueryBuilder('user');
 
     if (dto.email) {
@@ -329,11 +336,11 @@ export class AuthService {
         status: AttemptStatus.INVALID_USER,
       });
 
-      throw new UnauthorizedException(MESSAGES.INVALID_CREDENTIALS);
+      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 
     if (!user.isVerified) {
-      throw new UnauthorizedException(MESSAGES.INVALID_CREDENTIALS);
+      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 
     const passwordMatch = await bcrypt.compare(dto.password, user.password);
@@ -345,7 +352,7 @@ export class AuthService {
         attemptType: AttemptType.LOGIN,
         status: AttemptStatus.WRONG_PASSWORD,
       });
-      throw new UnauthorizedException(MESSAGES.INVALID_CREDENTIALS);
+      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 
     const session = await this.createUserSessionAndTokens(user, AUTH_PROVIDERS.LOCAL,device);
@@ -353,7 +360,7 @@ export class AuthService {
     this.logger.log(`User logged in: ${user.id}`);
 
     return {
-      message: MESSAGES.LOGIN_SUCCESS,
+      message: AUTH_MESSAGES.LOGIN_SUCCESS,
       data: session,
     };
   }
@@ -373,17 +380,17 @@ export class AuthService {
         `${process.env.FACEBOOK_GRAPH_URL}?fields=${process.env.FACEBOOK_FIELDS}&access_token=${dto.accessToken}`,
       );
     } catch (e) {
-      throw new UnauthorizedException(MESSAGES.FACEBOOK_VERIFICATION_FAILED);
+      throw new UnauthorizedException(AUTH_MESSAGES.FACEBOOK_VERIFICATION_FAILED,);
     }
 
     if (!response.ok) {
-      throw new UnauthorizedException(MESSAGES.INVALID_FACEBOOK_TOKEN);
+      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_FACEBOOK_TOKEN);
     }
 
     const profile = await response.json();
 
     if (!profile?.id) {
-      throw new UnauthorizedException(MESSAGES.FACEBOOK_USER_NOT_VERIFIED);
+      throw new UnauthorizedException(AUTH_MESSAGES.FACEBOOK_USER_NOT_VERIFIED);
     }
     let user = await this.userRepo.findOne({
       where: { facebookId: profile.id },
@@ -418,7 +425,7 @@ export class AuthService {
     );
     this.logger.log(`Facebook login successful for user: ${user.id}`);
     return {
-      message: MESSAGES.LOGIN_SUCCESS,
+      message: AUTH_MESSAGES.LOGIN_SUCCESS,
       data: session,
     };
   }
@@ -446,7 +453,7 @@ export class AuthService {
     });
 
     if (!session) {
-      throw new UnauthorizedException(MESSAGES.INVALID_REFRESH_TOKEN);
+      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_REFRESH_TOKEN);
     }
 
     const storedToken = await this.redisService.get(
@@ -454,13 +461,13 @@ export class AuthService {
     );
 
     if (!storedToken) {
-      throw new UnauthorizedException(MESSAGES.INVALID_REFRESH_TOKEN);
+      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_REFRESH_TOKEN);
     }
 
     const isValid = dto.refreshToken === storedToken;
 
     if (!isValid) {
-      throw new UnauthorizedException(MESSAGES.INVALID_REFRESH_TOKEN);
+      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_REFRESH_TOKEN);
     }
     await this.redisService.del(
       `${REDIS_KEYS.REFRESH_TOKEN}:${payload.sessionId}`,
@@ -489,7 +496,7 @@ export class AuthService {
     this.logger.log(`Refresh token rotated for user: ${payload.userId}`);
 
     return {
-      message: MESSAGES.REFRESH_TOKEN_SUCCESS,
+      message: AUTH_MESSAGES.REFRESH_TOKEN_SUCCESS,
       data: {
         accessToken: newAccessToken,
         refreshToken: newRefreshToken,
@@ -514,7 +521,7 @@ export class AuthService {
     );
 
     if (!session?.verified || session.type !== OtpType.FORGOT_PASSWORD) {
-      throw new UnauthorizedException(MESSAGES.OTP_NOT_VERIFIED);
+      throw new UnauthorizedException(AUTH_MESSAGES.OTP_NOT_VERIFIED);
     }
 
     const user = await this.userRepo.findOne({
@@ -527,14 +534,14 @@ export class AuthService {
       this.logger.warn(
         `Password reset requested for non-existing user: ${identifier}`,
       );
-      throw new NotFoundException(MESSAGES.USER_NOT_FOUND);
+      throw new NotFoundException(AUTH_MESSAGES.USER_NOT_FOUND);
     }
 
     const samePassword = await bcrypt.compare(dto.newPassword, user.password);
 
     if (samePassword) {
       this.logger.warn(`User tried resetting same password: ${identifier}`);
-      throw new BadRequestException(MESSAGES.PASSWORD_MUST_BE_DIFFERENT);
+      throw new BadRequestException(AUTH_MESSAGES.PASSWORD_MUST_BE_DIFFERENT);
     }
 
     const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
@@ -548,7 +555,7 @@ export class AuthService {
     );
     this.logger.log(`Password reset successful for user: ${user.id}`);
     return {
-      message: MESSAGES.PASSWORD_RESET_SUCCESS,
+      message: AUTH_MESSAGES.PASSWORD_RESET_SUCCESS,
       data: null,
     };
   }
@@ -571,19 +578,19 @@ export class AuthService {
 
     if (!session) {
       this.logger.warn(`Resend OTP failed: session expired for ${identifier}`);
-      throw new NotFoundException(MESSAGES.OTP_SESSION_EXPIRED);
+      throw new NotFoundException(AUTH_MESSAGES.OTP_SESSION_EXPIRED);
     }
 
     if (session.verified) {
       this.logger.warn(
         `Resend OTP attempted after verification for ${identifier}`,
       );
-      throw new BadRequestException(MESSAGES.OTP_ALREADY_VERIFIED);
+      throw new BadRequestException(AUTH_MESSAGES.OTP_ALREADY_VERIFIED);
     }
 
     if (session.type !== tempTokenData.type) {
       this.logger.warn(`Resend OTP type mismatch for ${identifier}`);
-      throw new BadRequestException(MESSAGES.INVALID_OTP_TYPE);
+      throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP_TYPE);
     }
 
     /**
@@ -638,7 +645,7 @@ export class AuthService {
     this.logger.log(`OTP resent successfully for ${identifier}`);
 
     return {
-      message: MESSAGES.OTP_SENT,
+      message: AUTH_MESSAGES.OTP_SENT,
       data: {
         tempToken: token,
       },
@@ -653,7 +660,7 @@ export class AuthService {
       where: { sessionId, isActive: true },
     });
     if (!session) {
-      throw new UnauthorizedException(MESSAGES.INVALID_SESSION);
+      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_SESSION);
     }
     await this.userSessionRepo.update({ sessionId }, { isActive: false });
 
@@ -662,7 +669,7 @@ export class AuthService {
     this.logger.log(`Session logged out: ${sessionId}`);
 
     return {
-      message: MESSAGES.LOGOUT_SUCCESS,
+      message: AUTH_MESSAGES.LOGOUT_SUCCESS,
       data: null,
     };
   }
@@ -687,7 +694,7 @@ export class AuthService {
     );
     this.logger.log(`All sessions logged out for user: ${userId}`);
 
-    return { message: MESSAGES.LOGOUT_SUCCESS, data: null };
+    return { message: AUTH_MESSAGES.LOGOUT_SUCCESS, data: null };
   }
 
   // Helper functions
@@ -695,7 +702,7 @@ export class AuthService {
   private getIdentifier(data: { email?: string; phone?: string }): string {
     const identifier = data.email || data.phone;
     if (!identifier) {
-      throw new BadRequestException(MESSAGES.EMAIL_OR_PHONE_REQUIRED);
+      throw new BadRequestException(AUTH_MESSAGES.EMAIL_OR_PHONE_REQUIRED);
     }
     return identifier;
   }
@@ -713,7 +720,7 @@ export class AuthService {
 
     if (attempts && Number(attempts) >= COMMON_CONFIG.otp.rateLimitMax) {
       this.logger.warn(`OTP rate limit exceeded for ${identifier}`);
-      throw new ForbiddenException(MESSAGES.TOO_MANY_OTP_REQUESTS);
+      throw new ForbiddenException(AUTH_MESSAGES.TOO_MANY_OTP_REQUESTS);
     }
 
     if (!attempts) {
