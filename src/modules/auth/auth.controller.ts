@@ -25,6 +25,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { FacebookLoginDto } from './dto/facebook-login.dto';
+import { DeviceHeader } from 'src/common/decorators/device.decorator';
 
 @ApiTags('Auth Module')
 @Controller('auth')
@@ -59,8 +60,9 @@ export class AuthController {
   createProfile(
     @Body() dto: CreateProfileDto,
     @Req() req: RequestWithTempToken,
+    @DeviceHeader() device: string,
   ) {
-    return this.authService.createProfile(dto, req.tempTokenData);
+    return this.authService.createProfile(dto, req.tempTokenData, device);
   }
 
   @Post('login')
@@ -68,8 +70,8 @@ export class AuthController {
   @ApiBasicAuth('BasicAuth')
   @ApiOperation({ summary: 'Login with email/phone/username and password' })
   @HttpCode(200)
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  login(@Body() dto: LoginDto, @DeviceHeader() device: string) {
+    return this.authService.login(dto, device);
   }
 
   @Post('facebook-login')
@@ -77,8 +79,8 @@ export class AuthController {
   @ApiBasicAuth('BasicAuth')
   @ApiOperation({ summary: 'Login or signup via Facebook' })
   @HttpCode(200)
-  loginWithFacebook(@Body() dto: FacebookLoginDto) {
-    return this.authService.facebookLogin(dto);
+  loginWithFacebook(@Body() dto: FacebookLoginDto, @DeviceHeader() device: string) {
+    return this.authService.facebookLogin(dto, device);
   }
 
   @Post('reset-password')

@@ -247,6 +247,7 @@ export class AuthService {
   async createProfile(
     dto: CreateProfileDto,
     tempTokenData: TempTokenData,
+    device: string,
   ): Promise<ApiResponse<CreateProfileResponse>> {
     const identifier = this.getIdentifier({
       email: tempTokenData.email,
@@ -296,6 +297,7 @@ export class AuthService {
     const session = await this.createUserSessionAndTokens(
       user,
       AUTH_PROVIDERS.LOCAL,
+      device,
     );
     this.logger.log(`User profile created: ${user.id}`);
     return {
@@ -307,7 +309,7 @@ export class AuthService {
   /**
    * Authenticates a user with email/phone/username + password and returns auth tokens.
    */
-  async login(dto: LoginDto): Promise<ApiResponse<LoginResponse>> {
+  async login(dto: LoginDto,device: string): Promise<ApiResponse<LoginResponse>> {
     const query = this.userRepo.createQueryBuilder('user');
 
     if (dto.email) {
@@ -346,7 +348,7 @@ export class AuthService {
       throw new UnauthorizedException(MESSAGES.INVALID_CREDENTIALS);
     }
 
-    const session = await this.createUserSessionAndTokens(user, 'local');
+    const session = await this.createUserSessionAndTokens(user, AUTH_PROVIDERS.LOCAL,device);
 
     this.logger.log(`User logged in: ${user.id}`);
 
@@ -362,6 +364,7 @@ export class AuthService {
    */
   async facebookLogin(
     dto: FacebookLoginDto,
+    device: string,
   ): Promise<ApiResponse<LoginResponse>> {
     let response: Response;
 
@@ -411,6 +414,7 @@ export class AuthService {
     const session = await this.createUserSessionAndTokens(
       user,
       AUTH_PROVIDERS.FACEBOOK,
+      device,
     );
     this.logger.log(`Facebook login successful for user: ${user.id}`);
     return {
@@ -755,6 +759,7 @@ export class AuthService {
   private async createUserSessionAndTokens(
     user: User,
     provider: AUTH_PROVIDERS = AUTH_PROVIDERS.LOCAL,
+    device: string,
   ): Promise<LoginResponse> {
     const sessionId = uuidv4();
 
@@ -772,7 +777,7 @@ export class AuthService {
       loginProvider: provider,
       loginAt: new Date(),
       expiresAt: new Date(Date.now() + JWT_CONFIG.refreshExpiresIn * 1000),
-      device: AUTH_CONSTANTS.UNKNOWN_DEVICE,
+      device,
       isActive: true,
     });
 
