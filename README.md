@@ -1,135 +1,176 @@
-# Instagram Clone – Onboarding Service (OTP + JWT Auth)
-## Secure User Authentication using NestJS + PostgreSQL + Redis
+# Instagram Clone – Auth Service
+## Secure Authentication using NestJS + PostgreSQL + Redis
 
-This Onboarding Service handles **user registration and authentication**
-through an OTP-based verification flow using JWT tokens and Redis session management.
+This Auth Service handles **user registration, login, session management, and password reset**
+through an OTP-based verification flow, password-based login, and Facebook OAuth —
+all backed by JWT tokens, Redis session management, and SMTP email delivery.
 
-It demonstrates how **real-world backend systems** implement secure,
-stateless authentication with token-based session handling
-decoupled from the main application logic.
-
-The goal of this service is to show **how production-grade auth systems work** —
-from identity verification to profile creation — in a clean, scalable, and secure manner.
+It demonstrates how **real-world backend systems** implement secure, stateless authentication
+with token rotation, device tracking, multi-provider support, and audit logging
+in a clean, modular, and scalable manner.
 
 ---
 
-## What is OTP-Based Auth (Easy Explanation)
+## What This Service Covers
 
-Instead of directly asking a user for a password during registration,
-OTP-based auth works like this:
-
-User → sends email/phone → OTP generated → stored in Redis → JWT temp token returned
-
-This approach ensures:
-
-- Identity verified before profile creation
-- No plaintext OTP stored (bcrypt hashed in Redis)
-- Stateless flow using JWT tokens
-- Session auto-expires via Redis TTL
+| Feature | Description |
+|---|---|
+| OTP Signup | Register via email/phone with OTP verification |
+| Password Login | Login with email / phone / username + password |
+| Facebook Login | OAuth login/signup via Facebook access token |
+| Forgot Password | Reset password via OTP verification |
+| Resend OTP | Re-send OTP with rate limiting |
+| Refresh Token | Rotate access + refresh tokens |
+| Logout | Deactivate session on current device |
+| Logout All | Deactivate all sessions across devices |
 
 ---
 
-## Authentication Flow
+## Authentication Flows
 
-The registration flow has **3 steps**:
+### Flow 1 — OTP Signup (3 Steps)
 
-1. Send OTP
-2. Verify OTP
-3. Create Profile
+```
+POST /auth/send-otp       → validate user, generate OTP, store in Redis, return temp token
+POST /auth/verify-otp     → verify OTP using temp token, mark session as verified in Redis
+POST /auth/create-profile → create user in DB, return access + refresh tokens
+```
 
-Each step is guarded and validated independently.
+### Flow 2 — Password Login
+
+```
+POST /auth/login → validate credentials, create session, return access + refresh tokens
+```
+
+### Flow 3 — Facebook Login
+
+```
+POST /auth/facebook-login → verify token with Graph API → find/link/create user → return tokens
+```
+
+### Flow 4 — Forgot Password (3 Steps)
+
+```
+POST /auth/send-otp       → type: FORGOT_PASSWORD → validate user exists, send OTP
+POST /auth/verify-otp     → verify OTP, mark session as verified
+POST /auth/reset-password → validate verified session, update hashed password
+```
+
+### Flow 5 — Session Management
+
+```
+POST /auth/resend-otp     → resend OTP (rate limited)
+POST /auth/refresh-token  → rotate refresh token, return new access + refresh tokens
+POST /auth/logout         → deactivate current session
+POST /auth/logout-all     → deactivate all sessions for the user
+```
+
+---
+
+## API Endpoints
+
+| Method | Endpoint | Guard | Description |
+|--------|----------|-------|-------------|
+| POST | `/auth/send-otp` | BasicAuth | Send OTP for signup or forgot-password |
+| POST | `/auth/verify-otp` | TempToken | Verify OTP |
+| POST | `/auth/create-profile` | TempToken | Create user profile after OTP verification |
+| POST | `/auth/login` | BasicAuth | Login with email/phone/username + password |
+| POST | `/auth/facebook-login` | BasicAuth | Login or register via Facebook |
+| POST | `/auth/reset-password` | TempToken | Reset password after OTP verification |
+| POST | `/auth/resend-otp` | TempToken | Resend OTP |
+| POST | `/auth/refresh-token` | BasicAuth | Rotate refresh token |
+| POST | `/auth/logout` | JwtAuth | Logout current device |
+| POST | `/auth/logout-all` | JwtAuth | Logout all devices |
+
+---
+
+## Guards
+
+| Guard | Protects | How |
+|-------|----------|-----|
+| `BasicAuthGuard` | Public entry points | App-level credentials in Authorization header |
+| `TempTokenGuard` | OTP flow steps | Short-lived JWT (temp token) in Authorization header |
+| `JwtAuthGuard` | Authenticated routes | Access token in Authorization header |
 
 ---
 
 ## Why JWT + Redis Together?
 
-JWT and Redis serve different purposes in this system:
+| | JWT | Redis |
+|---|---|---|
+| **Temp Token** | Carries identity (email/phone + OTP type) between flow steps | Stores hashed OTP + verified state + attempt count |
+| **Access Token** | Short-lived (10 min), stateless auth for protected routes | — |
+| **Refresh Token** | Long-lived (7 days), used to rotate tokens | Stores refresh token string keyed by sessionId |
 
-- **JWT (Temp Token)**
-  - Carries identity (email/phone) between steps
-  - Stateless — no DB lookup needed
-  - Expires in 5 minutes (same as OTP TTL)
-
-- **Redis (OTP Session)**
-  - Stores hashed OTP securely
-  - Tracks `verified` state between steps
-  - Auto-expires using TTL — no manual cleanup needed
-
----
-
-## API Flow Implemented
-
-### Step 1 — Send OTP (BasicAuth Protected)
-
-Used to initiate registration with email or phone.
-
-Request:
-POST /auth/send-otp
-
-Protected by BasicAuth (app-level authentication).
-
-Flow:
-Client → BasicAuthGuard → OTP generated → hashed & stored in Redis → JWT temp token returned
-
----
-
-### Step 2 — Verify OTP (TempToken Protected)
-
-Used to verify the OTP received by the user.
-
-Request:
-POST /auth/verify-otp
-
-Protected by TempTokenGuard (JWT in Authorization header).
-
-Flow:
-Client → TempTokenGuard → extract identifier from JWT → fetch OTP from Redis → bcrypt.compare → mark verified
-
----
-
-### Step 3 — Create Profile (TempToken Protected)
-
-Used to complete registration after OTP is verified.
-
-Request:
-POST /auth/create-profile
-
-Protected by TempTokenGuard (same JWT from Step 1).
-
-Flow:
-Client → TempTokenGuard → check Redis verified:true → create user in DB → return accessToken + refreshToken
+Redis TTL ensures automatic expiry — no manual cleanup needed.
 
 ---
 
 ## Security Concepts Applied
 
-### OTP Hashing
-OTP is hashed using bcrypt before storing in Redis.
-Plain OTP is never stored anywhere.
-
-### JWT Temp Token
-Contains only identity info (email/phone + type).
-Used exclusively for the onboarding flow.
-Expires in the same TTL as the OTP session.
-
-### Access + Refresh Tokens
-After profile creation, two tokens are issued:
-- Access Token — short-lived (10 minutes)
-- Refresh Token — long-lived (7 days)
+- **OTP hashing** — bcrypt hash stored in Redis; plain OTP never persisted
+- **Temp token expiry** — same TTL as OTP session (configurable, default 20 min)
+- **Brute force protection** — `verifyAttempts` tracked in Redis; throws after max attempts
+- **OTP rate limiting** — per-identifier Redis counter with configurable window and max requests
+- **Token rotation** — refresh token replaced on every `/refresh-token` call
+- **Session tracking** — every login creates a `UserSession` row with device, provider, loginAt, expiresAt
+- **Auth attempt audit** — failed signups/logins/forgot-password attempts logged to `auth_attempts` table
+- **Multi-provider support** — `provider` field on user distinguishes `local` vs `facebook` accounts
+- **Facebook account linking** — existing local account auto-linked by email on first Facebook login
+- **OTP bypass** — configurable bypass code for dev/qa environments (disabled in production)
+- **Device detection** — `device` header or User-Agent parsed and stored per session
 
 ---
 
-## Tech Stack Used
+## Database Entities
+
+### `users`
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid | PK, from BaseEntity |
+| email | string | nullable, unique, indexed |
+| phone | string | nullable, unique, indexed |
+| username | string | nullable, unique, indexed |
+| fullName | string | nullable |
+| age | number | nullable |
+| gender | string | nullable |
+| password | string | nullable, excluded from select by default |
+| facebookId | string | nullable, unique |
+| provider | enum | `local` \| `facebook` |
+| isVerified | boolean | default false |
+
+### `user_sessions`
+| Column | Type | Notes |
+|--------|------|-------|
+| userId | string | FK → users |
+| sessionId | uuid | unique, indexed |
+| device | string | from header or user-agent |
+| loginProvider | enum | `local` \| `facebook` |
+| loginAt | timestamp | — |
+| expiresAt | timestamp | refresh token expiry |
+| isActive | boolean | false on logout |
+
+### `auth_attempts`
+| Column | Type | Notes |
+|--------|------|-------|
+| email | string | nullable, indexed |
+| phone | string | nullable, indexed |
+| attemptType | enum | `signup` \| `login` \| `forgot_password` |
+| status | enum | `invalid_user` \| `wrong_password` \| `user_already_exists` |
+
+---
+
+## Tech Stack
 
 - NestJS
-- PostgreSQL
-- TypeORM
+- PostgreSQL + TypeORM
 - Redis (ioredis)
-- JWT (@nestjs/jwt)
+- JWT (`@nestjs/jwt`)
 - bcrypt
+- Nodemailer (SMTP OTP delivery)
+- Facebook Graph API (OAuth)
 - class-validator / class-transformer
-- Swagger (@nestjs/swagger)
-- dotenv
+- Swagger (`@nestjs/swagger`)
 - tsconfig-paths
 
 ---
@@ -140,37 +181,69 @@ After profile creation, two tokens are issued:
 src/
 ├── common/
 │   ├── constants/
-│   │   └── constants.ts
+│   │   └── constants.ts          # AUTH_CONSTANTS, AUTH_PROVIDERS, REDIS_KEYS
+│   ├── decorators/
+│   │   ├── current-user.decorator.ts   # @CurrentUser() — extracts JWT payload fields
+│   │   └── device.decorator.ts         # @DeviceHeader() — reads device from header/UA
+│   ├── entities/
+│   │   └── base.entity.ts        # id, createdAt, updatedAt
+│   ├── enum/
+│   │   └── enum.common.ts        # AttemptType, AttemptStatus, Gender, OtpType
+│   ├── filters/
+│   │   └── http-exception.filter.ts    # Global exception → consistent error shape
 │   ├── guards/
 │   │   ├── basic-auth.guard.ts
+│   │   ├── jwt-auth.guard.ts
 │   │   └── temp-token.guard.ts
 │   ├── interceptors/
-│   │   ├── request.interceptor.ts
-│   │   └── response.interceptor.ts
-│   ├── filters/
-│   │   └── http-exception.filter.ts
-│   └── types/
-│       └── auth.types.ts
+│   │   ├── request.interceptor.ts      # Logs incoming requests
+│   │   └── response.interceptor.ts     # Wraps all responses in standard shape
+│   ├── logger/
+│   │   ├── logger.module.ts
+│   │   └── logger.service.ts           # AppLogger extending NestJS Logger
+│   ├── types/
+│   │   └── auth.types.ts         # TempTokenData, JwtPayload, RequestWithTempToken
+│   ├── utils/
+│   │   └── device.util.ts        # Parses User-Agent string into device info
+│   └── validators/
+│       ├── email-or-phone.validator.ts
+│       └── login.validator.ts
 ├── config/
-│   └── jwt.config.ts
+│   ├── common.config.ts          # COMMON_CONFIG (otp, redis, nodeEnv)
+│   ├── env.configuration.ts      # Reads and parses all env vars
+│   └── jwt.config.ts             # JWT_CONFIG (secret, expiresIn, refresh*)
 ├── database/
 │   ├── data-source.ts
+│   ├── database.config.ts
 │   ├── database.module.ts
 │   └── migrations/
 ├── modules/
 │   ├── auth/
-│   │   ├── constants/
 │   │   ├── dto/
+│   │   │   ├── create-profile.dto.ts
+│   │   │   ├── facebook-login.dto.ts
+│   │   │   ├── login.dto.ts
+│   │   │   ├── refresh-token.dto.ts
+│   │   │   ├── reset-password.dto.ts
+│   │   │   ├── send-otp.dto.ts
+│   │   │   └── verify-otp.dto.ts
 │   │   ├── interfaces/
+│   │   │   └── auth-response.interface.ts
 │   │   ├── response/
+│   │   │   └── auth.response.ts  # MESSAGES constant
 │   │   ├── auth.controller.ts
 │   │   ├── auth.module.ts
 │   │   └── auth.service.ts
 │   └── user/
 │       ├── entities/
-│       │   └── user.entity.ts
+│       │   ├── auth_attempts.entity.ts
+│       │   ├── user.entity.ts
+│       │   └── user_sessions.entity.ts
 │       └── users.module.ts
 ├── shared/
+│   ├── mailer/
+│   │   ├── mailer.module.ts
+│   │   └── mailer.service.ts     # Nodemailer SMTP — sends OTP emails
 │   └── redis/
 │       ├── redis.module.ts
 │       └── redis.service.ts
@@ -183,63 +256,94 @@ src/
 ## Setup Instructions
 
 ### Clone Repository
-```
+
+```bash
 git clone <your-repo-url>
 cd instagram-clone
 npm install
 ```
 
----
-
 ### Start PostgreSQL
-Make sure PostgreSQL is running and a database is created:
-```
+
+```sql
 CREATE DATABASE instagram_clone;
 ```
 
----
-
 ### Start Redis
-```
+
+```bash
 redis-server
 ```
 
 Or using Docker:
-```
+
+```bash
 docker run -d --name redis -p 6379:6379 redis
 ```
 
----
-
 ### Configure Environment Variables
+
 Create a `.env` file in the root:
-```
+
+```env
+# App
+NODE_ENV=development
+PORT=3000
+
+# Basic Auth
+BASIC_AUTH_USER=admin
+BASIC_AUTH_PASS=secret
+
+# Database
 DB_HOST=localhost
 DB_PORT=5432
 DB_USERNAME=postgres
 DB_PASSWORD=your_password
 DB_NAME=instagram_clone
 
+# JWT
 JWT_SECRET=your_jwt_secret
 JWT_EXPIRES_IN=600
 JWT_REFRESH_SECRET=your_refresh_secret
 JWT_REFRESH_EXPIRES_IN=604800
 
-PORT=3000
-```
+# Redis
+REDIS_HOST=localhost
+REDIS_PORT=6379
 
----
+# OTP
+OTP_TTL_SECONDS=600
+TEMP_TOKEN_EXPIRES_IN=1200
+OTP_RATE_LIMIT_MAX=5
+OTP_RATE_LIMIT_WINDOW_SECONDS=300
+OTP_MAX_VERIFY_ATTEMPTS=5
+
+# OTP Bypass (dev/qa only)
+BYPASS_OTP_ENABLED=true
+BYPASS_OTP=123456
+
+# SMTP (OTP email delivery)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your_email@gmail.com
+SMTP_PASS=your_app_password
+
+# Facebook OAuth
+FACEBOOK_GRAPH_URL=https://graph.facebook.com/me
+FACEBOOK_FIELDS=id,name,email
+```
 
 ### Run Database Migrations
-```
+
+```bash
 npm run migration:generate
 npm run migration:run
 ```
 
----
-
 ### Start Application
-```
+
+```bash
 npm run start:dev
 ```
 
@@ -247,29 +351,12 @@ npm run start:dev
 
 ## Swagger API Docs
 
-After starting the app, open:
-
 ```
 http://localhost:3000/api
 ```
 
 All endpoints are documented with request/response schemas.
 BasicAuth and BearerAuth are both configured in Swagger.
-
----
-
-## Internal Working (Step-by-Step)
-
-1. Client sends email/phone with BasicAuth credentials
-2. OTP is generated and hashed with bcrypt
-3. Hashed OTP + `verified: false` stored in Redis with TTL
-4. JWT temp token signed with identifier (email/phone) returned to client
-5. Client sends OTP with temp token in Authorization header
-6. Guard validates JWT → extracts identifier → Redis fetched
-7. bcrypt.compare verifies OTP → Redis updated to `verified: true`
-8. Client sends profile data with same temp token
-9. Guard validates JWT → Redis checked for `verified: true`
-10. User saved in PostgreSQL → Redis key deleted → accessToken + refreshToken returned
 
 ---
 
@@ -283,36 +370,58 @@ BasicAuth and BearerAuth are both configured in Swagger.
 
 ---
 
-## Production-Level Concepts Applied
+## Internal Working — Step by Step
 
-- OTP hashing with bcrypt (no plaintext OTP storage)
-- Redis TTL for automatic session expiry
-- JWT-based stateless authentication
-- Separation of temp token and access/refresh tokens
-- Guard-based route protection
-- Global exception filter for consistent error responses
-- Global response interceptor for consistent API shape
-- Request logging interceptor
-- Environment-based configuration with `getOrThrow`
-- Path alias resolution via tsconfig-paths
+### OTP Signup
+1. Client sends email/phone with BasicAuth credentials
+2. Rate limit checked via Redis counter
+3. OTP generated, bcrypt-hashed, stored in Redis with TTL (`verified: false`)
+4. Short-lived JWT temp token returned to client
+5. Client sends OTP + temp token → Guard extracts identifier → Redis fetched
+6. bcrypt.compare verifies OTP → Redis updated to `verified: true`
+7. Client sends profile data + temp token → Guard validates → Redis checks `verified: true`
+8. User saved in PostgreSQL → Redis key deleted → access + refresh tokens returned
+
+### Login
+1. Client sends credentials with BasicAuth
+2. User fetched by email/phone/username, password bcrypt-compared
+3. New `UserSession` created with device, provider, loginAt, expiresAt
+4. Refresh token stored in Redis keyed by sessionId
+5. Access + refresh tokens returned
+
+### Facebook Login
+1. Facebook access token verified against Graph API
+2. User looked up by `facebookId`; if not found, looked up by email and linked
+3. If no user found, new user created with `provider: facebook`
+4. Session created same as login flow
+
+### Token Refresh
+1. Refresh token verified against JWT secret
+2. Session checked in DB (`isActive: true`)
+3. Token string compared with Redis-stored value
+4. Old token deleted from Redis; new token pair generated and stored
+5. Session `expiresAt` updated
 
 ---
 
 ## What I Learned from This Project
 
 - How **OTP-based authentication** works in production
-- How **Redis** is used for short-lived session management
+- How **Redis** is used for short-lived session management and rate limiting
 - How **JWT** enables stateless identity transfer between steps
 - How to implement **multi-step auth flows** in NestJS
-- How **Guards** protect routes at different levels
-- How to structure a **modular NestJS backend** cleanly
+- How to implement **multi-provider auth** (local + Facebook OAuth)
+- How to track **sessions per device** and support logout-all
+- How **Guards and Decorators** protect routes cleanly
+- How to structure a **modular NestJS backend** at scale
 - How to use **TypeORM migrations** for schema management
+- How to send **transactional emails** via SMTP with Nodemailer
 
 ---
 
 ## Made By Deeksha
 
-This **Instagram Clone Backend** demonstrates a **production-grade OTP authentication system**
-using NestJS with JWT, Redis, and PostgreSQL.
-It implements a clean **3-step onboarding flow** with proper security,
-token management, and modular architecture.
+This **Instagram Clone Backend** demonstrates a **production-grade authentication system**
+using NestJS with JWT, Redis, PostgreSQL, SMTP email, and Facebook OAuth.
+It implements secure multi-step flows with rate limiting, session tracking,
+device awareness, audit logging, and token rotation.
