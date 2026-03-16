@@ -24,6 +24,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
+import { FacebookLoginDto } from './dto/facebook-login.dto';
 
 @ApiTags('Auth Module')
 @Controller('auth')
@@ -69,6 +70,15 @@ export class AuthController {
   @HttpCode(200)
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  @Post('facebook-login')
+  @UseGuards(BasicAuthGuard)
+  @ApiBasicAuth('BasicAuth')
+  @ApiOperation({ summary: 'Login or signup via Facebook' })
+  @HttpCode(200)
+  loginWithFacebook(@Body() dto: FacebookLoginDto) {
+    return this.authService.facebookLogin(dto);
   }
 
   @Post('reset-password')

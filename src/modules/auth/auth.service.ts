@@ -16,7 +16,11 @@ import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { TempTokenData } from 'src/common/types/auth.types';
-import { AUTH_CONSTANTS } from 'src/common/constants/constants';
+import {
+  AUTH_CONSTANTS,
+  AUTH_PROVIDERS,
+  REDIS_KEYS,
+} from 'src/common/constants/constants';
 import { MESSAGES } from './response/auth.response';
 import { JWT_CONFIG } from 'src/config/jwt.config';
 import {
@@ -36,6 +40,7 @@ import { COMMON_CONFIG, NODE_ENV_TYPE } from 'src/config/common.config';
 import { AttemptStatus, AttemptType, OtpType } from 'src/common/enum/enum.common';
 import { UserSession } from '../user/entities/user_sessions.entity';
 import { v4 as uuidv4 } from 'uuid';
+import { FacebookLoginDto } from './dto/facebook-login.dto';
 
 @Injectable()
 export class AuthService {
@@ -58,14 +63,8 @@ export class AuthService {
   ) {}
 
   /**
-   * Sends OTP for signup or forgot password.
-   *
-   * Flow:
-   * 1. Validate user existence depending on OTP type
-   * 2. Generate OTP (email/phone)
-   * 3. Store hashed OTP in Redis with TTL
-   * 4. Return temporary token for OTP verification
-   * 5. Applies rate limiting using Redis to prevent OTP spam attacks.
+   * Sends an OTP for signup or forgot-password; validates user existence, applies rate limiting,
+   * hashes & stores the OTP in Redis, and returns a short-lived temp token.
    */
   async sendOtp(dto: SendOtpDto): Promise<ApiResponse<SendOtpResponse>> {
     const identifier = this.getIdentifier(dto);
@@ -172,9 +171,8 @@ export class AuthService {
   }
 
   /**
-   * Verify OTP for given identifier (email/phone).
-   * - Protects against brute force by tracking verifyAttempts.
-   * - Marks session as verified in Redis on success.
+   * Verifies the OTP for a given identifier; tracks attempts to prevent brute force
+   * and marks the Redis session as verified on success.
    */
   async verifyOtp(
     dto: VerifyOtpDto,
@@ -243,6 +241,9 @@ export class AuthService {
     };
   }
 
+  /**
+   * Creates a new user account after OTP verification; saves the user in DB and returns auth tokens.
+   */
   async createProfile(
     dto: CreateProfileDto,
     tempTokenData: TempTokenData,
@@ -251,19 +252,19 @@ export class AuthService {
       email: tempTokenData.email,
       phone: tempTokenData.phoneNumber,
     });
-    const session = await this.redisService.get(
+    const otpSsession = await this.redisService.get(
       `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
     );
 
-    if (!session) {
+    if (!otpSsession) {
       throw new NotFoundException(MESSAGES.OTP_SESSION_EXPIRED);
     }
 
-    if (session.type === OtpType.FORGOT_PASSWORD) {
+    if (otpSsession.type === OtpType.FORGOT_PASSWORD) {
       throw new BadRequestException(MESSAGES.INVALID_OTP_TYPE);
     }
 
-    if (!session.verified) {
+    if (!otpSsession.verified) {
       throw new UnauthorizedException(MESSAGES.OTP_NOT_VERIFIED);
     }
 
@@ -292,54 +293,19 @@ export class AuthService {
       `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
     );
 
-    const sessionId = uuidv4();
-    const payload = { userId: user.id, username: user.username, sessionId };
-    const accessToken = this.jwtService.sign(payload, {
-      secret: JWT_CONFIG.secret,
-      expiresIn: JWT_CONFIG.expiresIn, // 10 min
-    });
-    const refreshToken = this.jwtService.sign(payload, {
-      secret: JWT_CONFIG.refreshSecret,
-      expiresIn: JWT_CONFIG.refreshExpiresIn,
-    });
-
-    const newSession = this.userSessionRepo.create({
-      userId: user.id,
-      sessionId,
-      loginAt: new Date(),
-      expiresAt: new Date(Date.now() + JWT_CONFIG.refreshExpiresIn * 1000),
-      device: 'unknown',
-      isActive: true,
-    });
-
-    await this.userSessionRepo.save(newSession);
-
-    // const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
-
-    await this.redisService.set(
-      `refresh_token:${sessionId}`,
-      refreshToken,
-      JWT_CONFIG.refreshExpiresIn,
+    const session = await this.createUserSessionAndTokens(
+      user,
+      AUTH_PROVIDERS.LOCAL,
     );
     this.logger.log(`User profile created: ${user.id}`);
     return {
       message: MESSAGES.PROFILE_CREATED,
-      data: {
-        userId: user.id,
-        accessToken,
-        refreshToken,
-      },
+      data: session,
     };
   }
 
   /**
-   * Authenticates user using email/phone/username and password.
-   *
-   * Flow:
-   * 1. Fetch user
-   * 2. Validate password
-   * 3. Generate access + refresh tokens
-   * 4. Store refresh token hash in Redis
+   * Authenticates a user with email/phone/username + password and returns auth tokens.
    */
   async login(dto: LoginDto): Promise<ApiResponse<LoginResponse>> {
     const query = this.userRepo.createQueryBuilder('user');
@@ -380,60 +346,82 @@ export class AuthService {
       throw new UnauthorizedException(MESSAGES.INVALID_CREDENTIALS);
     }
 
-    const sessionId = uuidv4();
-    const payload = {
-      userId: user.id,
-      username: user.username,
-      sessionId,
-    };
+    const session = await this.createUserSessionAndTokens(user, 'local');
 
-    const accessToken = this.jwtService.sign(payload, {
-      secret: JWT_CONFIG.secret,
-      expiresIn: JWT_CONFIG.expiresIn,
-    });
-
-    const refreshToken = this.jwtService.sign(payload, {
-      secret: JWT_CONFIG.refreshSecret,
-      expiresIn: JWT_CONFIG.refreshExpiresIn,
-    });
-
-    // create new session metadata in DB
-    const newSession = this.userSessionRepo.create({
-      userId: user.id,
-      sessionId,
-      loginAt: new Date(),
-      expiresAt: new Date(Date.now() + JWT_CONFIG.refreshExpiresIn * 1000),
-      device: 'unknown',
-      isActive: true,
-    });
-
-    await this.userSessionRepo.save(newSession);
-
-    await this.redisService.set(
-      `refresh_token:${sessionId}`,
-      refreshToken,
-      JWT_CONFIG.refreshExpiresIn,
-    );
     this.logger.log(`User logged in: ${user.id}`);
 
     return {
       message: MESSAGES.LOGIN_SUCCESS,
-      data: {
-        userId: user.id,
-        accessToken,
-        refreshToken,
-      },
+      data: session,
     };
   }
 
   /**
-   * Generates a new access token using a valid refresh token.
-   *
-   * Flow:
-   * 1. Verify refresh token
-   * 2. Compare with stored hash in Redis
-   * 3. Rotate refresh token
-   * 4. Return new tokens
+   * Logs in or registers a user via Facebook access token;
+   * links to an existing account by email if found, otherwise creates a new one.
+   */
+  async facebookLogin(
+    dto: FacebookLoginDto,
+  ): Promise<ApiResponse<LoginResponse>> {
+    let response: Response;
+
+    try {
+      response = await fetch(
+        `${process.env.FACEBOOK_GRAPH_URL}?fields=${process.env.FACEBOOK_FIELDS}&access_token=${dto.accessToken}`,
+      );
+    } catch (e) {
+      throw new UnauthorizedException(MESSAGES.FACEBOOK_VERIFICATION_FAILED);
+    }
+
+    if (!response.ok) {
+      throw new UnauthorizedException(MESSAGES.INVALID_FACEBOOK_TOKEN);
+    }
+
+    const profile = await response.json();
+
+    if (!profile?.id) {
+      throw new UnauthorizedException(MESSAGES.FACEBOOK_USER_NOT_VERIFIED);
+    }
+    let user = await this.userRepo.findOne({
+      where: { facebookId: profile.id },
+    });
+    if (!user && profile.email) {
+      user = await this.userRepo.findOne({
+        where: { email: profile.email },
+      });
+
+      if (user) {
+        user.facebookId = profile.id;
+        user.provider = AUTH_PROVIDERS.FACEBOOK;
+
+        await this.userRepo.save(user);
+      }
+    }
+    if (!user) {
+      user = this.userRepo.create({
+        email: profile.email,
+        fullName: profile.name,
+        isVerified: true,
+        facebookId: profile.id,
+        provider: AUTH_PROVIDERS.FACEBOOK,
+      });
+
+      await this.userRepo.save(user);
+    }
+    const session = await this.createUserSessionAndTokens(
+      user,
+      AUTH_PROVIDERS.FACEBOOK,
+    );
+    this.logger.log(`Facebook login successful for user: ${user.id}`);
+    return {
+      message: MESSAGES.LOGIN_SUCCESS,
+      data: session,
+    };
+  }
+
+  /**
+   * Rotates the refresh token: verifies the existing one against Redis,
+   * then issues a new access + refresh token pair.
    */
   async refreshToken(
     dto: RefreshTokenDto,
@@ -458,7 +446,7 @@ export class AuthService {
     }
 
     const storedToken = await this.redisService.get(
-      `refresh_token:${payload.sessionId}`,
+      `${REDIS_KEYS.REFRESH_TOKEN}:${payload.sessionId}`,
     );
 
     if (!storedToken) {
@@ -470,28 +458,21 @@ export class AuthService {
     if (!isValid) {
       throw new UnauthorizedException(MESSAGES.INVALID_REFRESH_TOKEN);
     }
-    await this.redisService.del(`refresh_token:${payload.sessionId}`);
-
-    const newAccessToken = this.jwtService.sign(
-      { userId: payload.userId, username: payload.username, sessionId: payload.sessionId },
-      {
-        secret: JWT_CONFIG.secret,
-        expiresIn: JWT_CONFIG.expiresIn,
-      },
+    await this.redisService.del(
+      `${REDIS_KEYS.REFRESH_TOKEN}:${payload.sessionId}`,
     );
 
-    const newRefreshToken = this.jwtService.sign(
-      { userId: payload.userId, username: payload.username, sessionId: payload.sessionId },
-      {
-        secret: JWT_CONFIG.refreshSecret,
-        expiresIn: JWT_CONFIG.refreshExpiresIn,
-      },
-    );
+    const { accessToken: newAccessToken, refreshToken: newRefreshToken } =
+      this.generateJwtTokens({
+        userId: payload.userId,
+        username: payload.username,
+        sessionId: payload.sessionId,
+      });
 
     // const newHashedRefreshToken = await bcrypt.hash(newRefreshToken, 10);
 
     await this.redisService.set(
-      `refresh_token:${payload.sessionId}`,
+      `${REDIS_KEYS.REFRESH_TOKEN}:${payload.sessionId}`,
       newRefreshToken,
       JWT_CONFIG.refreshExpiresIn,
     );
@@ -512,6 +493,10 @@ export class AuthService {
     };
   }
 
+  /**
+   * Resets the user's password after verifying the forgot-password OTP;
+   * rejects if the new password is the same as the current one.
+   */
   async resetPassword(
     dto: ResetPasswordDto,
     tempTokenData: TempTokenData,
@@ -565,8 +550,8 @@ export class AuthService {
   }
 
   /**
-   * Resends OTP to the user if the previous OTP session is still valid.
-   * Applies rate limiting and respects OTP bypass rules for dev/qa environments.
+   * Resends OTP if the previous session is still valid; rate-limited and
+   * respects the OTP bypass setting in dev/qa environments.
    */
   async resendOtp(
     tempTokenData: TempTokenData,
@@ -657,8 +642,7 @@ export class AuthService {
   }
 
   /**
-   * deactivate session in DB
-   * delete refresh token from Redis
+   * Deactivates the given session in DB and removes its refresh token from Redis.
    */
   async logout(sessionId: string): Promise<ApiResponse<null>> {
     const session = await this.userSessionRepo.findOne({
@@ -669,7 +653,7 @@ export class AuthService {
     }
     await this.userSessionRepo.update({ sessionId }, { isActive: false });
 
-    await this.redisService.del(`refresh_token:${sessionId}`);
+    await this.redisService.del(`${REDIS_KEYS.REFRESH_TOKEN}:${sessionId}`);
 
     this.logger.log(`Session logged out: ${sessionId}`);
 
@@ -679,13 +663,18 @@ export class AuthService {
     };
   }
 
+  /**
+   * Deactivates all active sessions for a user and clears their refresh tokens from Redis.
+   */
   async logoutAll(userId: string): Promise<ApiResponse<null>> {
     const sessions = await this.userSessionRepo.find({
       where: { userId, isActive: true },
     });
 
     for (const session of sessions) {
-      await this.redisService.del(`refresh_token:${session.sessionId}`);
+      await this.redisService.del(
+        `${REDIS_KEYS.REFRESH_TOKEN}:${session.sessionId}`,
+      );
     }
 
     await this.userSessionRepo.update(
@@ -694,11 +683,11 @@ export class AuthService {
     );
     this.logger.log(`All sessions logged out for user: ${userId}`);
 
-    return { message: MESSAGES.LOGOUT_SUCCESS,
-      data: null };
+    return { message: MESSAGES.LOGOUT_SUCCESS, data: null };
   }
 
   // Helper functions
+  /** Returns email or phone as a single identifier string; throws if neither is provided. */
   private getIdentifier(data: { email?: string; phone?: string }): string {
     const identifier = data.email || data.phone;
     if (!identifier) {
@@ -707,10 +696,12 @@ export class AuthService {
     return identifier;
   }
 
+  /** Generates a 6-digit random OTP string. */
   private generateRandomOtp(): string {
     return Math.floor(100000 + Math.random() * 900000).toString();
   }
 
+  /** Enforces per-identifier OTP request rate limiting via Redis; throws if the limit is exceeded. */
   private async checkOtpRateLimit(identifier: string): Promise<void> {
     const key = `otp_rate_limit:${identifier}`;
 
@@ -728,10 +719,75 @@ export class AuthService {
     }
   }
 
+  /** Returns true if OTP bypass is enabled and the current environment is dev or QA. */
   private isOtpBypassAllowed() {
     return (
       COMMON_CONFIG.otp.bypassEnabled &&
       [NODE_ENV_TYPE.DEV, NODE_ENV_TYPE.QA].includes(COMMON_CONFIG.nodeEnv)
     );
+  }
+
+  /**
+   * Signs and returns access + refresh JWT tokens for the given session payload.
+   */
+  private generateJwtTokens(payload: {
+    userId: string;
+    username: string;
+    sessionId: string;
+  }) {
+    const accessToken = this.jwtService.sign(payload, {
+      secret: JWT_CONFIG.secret,
+      expiresIn: JWT_CONFIG.expiresIn,
+    });
+
+    const refreshToken = this.jwtService.sign(payload, {
+      secret: JWT_CONFIG.refreshSecret,
+      expiresIn: JWT_CONFIG.refreshExpiresIn,
+    });
+
+    return { accessToken, refreshToken };
+  }
+
+  /**
+   * Persists a new session record in DB, stores the refresh token in Redis,
+   * and returns the access + refresh token pair.
+   */
+  private async createUserSessionAndTokens(
+    user: User,
+    provider: AUTH_PROVIDERS = AUTH_PROVIDERS.LOCAL,
+  ): Promise<LoginResponse> {
+    const sessionId = uuidv4();
+
+    const payload = {
+      userId: user.id,
+      username: user.username,
+      sessionId,
+    };
+
+    const { accessToken, refreshToken } = this.generateJwtTokens(payload);
+
+    const newSession = this.userSessionRepo.create({
+      userId: user.id,
+      sessionId,
+      loginProvider: provider,
+      loginAt: new Date(),
+      expiresAt: new Date(Date.now() + JWT_CONFIG.refreshExpiresIn * 1000),
+      device: AUTH_CONSTANTS.UNKNOWN_DEVICE,
+      isActive: true,
+    });
+
+    await this.userSessionRepo.save(newSession);
+
+    await this.redisService.set(
+      `${REDIS_KEYS.REFRESH_TOKEN}:${sessionId}`,
+      refreshToken,
+      JWT_CONFIG.refreshExpiresIn,
+    );
+
+    return {
+      userId: user.id,
+      accessToken,
+      refreshToken,
+    };
   }
 }
