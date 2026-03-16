@@ -8,7 +8,7 @@ export const MESSAGES = {
   OTP_SENT: 'OTP sent successfully',
   OTP_VERIFIED: 'OTP verified successfully',
   LOGIN_SUCCESS: 'Login successful',
-  LOGOUT_SUCCESS: 'Logout successful', 
+  LOGOUT_SUCCESS: 'Logout successful',
   INVALID_CREDENTIALS: 'Invalid credentials',
   USER_ALREADY_EXISTS: 'User already exists',
   USER_NOT_FOUND: 'User not found',
@@ -22,5 +22,8 @@ export const MESSAGES = {
   REFRESH_TOKEN_SUCCESS: 'Token refreshed successfully',
   TOO_MANY_OTP_REQUESTS: 'Too many OTP requests. Please try again later',
   TOO_MANY_VERIFY_OTP_ATTEMPTS: 'Too many verify OTP attempts. Please try again later',
-  INVALID_SESSION: 'Invalid session'
+  INVALID_SESSION: 'Invalid session',
+  INVALID_FACEBOOK_TOKEN: 'Invalid Facebook token',
+  FACEBOOK_USER_NOT_VERIFIED: 'Unable to verify Facebook user',
+  FACEBOOK_VERIFICATION_FAILED: 'Facebook verification failed',
 };
