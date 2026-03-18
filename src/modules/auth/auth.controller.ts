@@ -21,11 +21,12 @@ import type { RequestWithTempToken } from 'src/common/types/auth.types';
 import { BasicAuthGuard } from 'src/common/guards/basic-auth.guard';
 import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { FacebookLoginDto } from './dto/facebook-login.dto';
 import { DeviceHeader } from 'src/common/decorators/device.decorator';
+import { JwtRefreshGuard } from 'src/common/guards/jwt-refresh.guard';
+import type { RefreshTokenPayload } from './interfaces/auth-response.interface';
 
 @ApiTags('Auth Module')
 @Controller('auth')
@@ -105,12 +106,12 @@ export class AuthController {
   }
 
   @Post('refresh-token')
-  @UseGuards(BasicAuthGuard)
-  @ApiBasicAuth('BasicAuth')
-  @ApiOperation({ summary: 'Refresh access token using refresh token' })
+  @UseGuards(JwtRefreshGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Refresh access token' })
   @HttpCode(200)
-  refreshToken(@Body() dto: RefreshTokenDto) {
-    return this.authService.refreshToken(dto);
+  refreshToken(@CurrentUser() user: RefreshTokenPayload) {
+    return this.authService.refreshToken(user);
   }
 
   @Post('logout')
