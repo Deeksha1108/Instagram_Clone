@@ -26,3 +26,9 @@ export interface RefreshTokenResponse {
   accessToken: string;
   refreshToken: string;
 }
+
+export interface RefreshTokenPayload {
+  userId: string;
+  username: string;
+  sessionId: string;
+}

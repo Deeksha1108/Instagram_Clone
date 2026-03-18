@@ -26,6 +26,7 @@ import {
   ApiResponse,
   CreateProfileResponse,
   LoginResponse,
+  RefreshTokenPayload,
   RefreshTokenResponse,
   SendOtpResponse,
   VerifyOtpResponse,
@@ -33,7 +34,6 @@ import {
 import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MailerService } from 'src/shared/mailer/mailer.service';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { AuthAttempt } from '../user/entities/auth_attempts.entity';
 import { COMMON_CONFIG, NODE_ENV_TYPE } from 'src/config/common.config';
 import {
@@ -355,7 +355,7 @@ export class AuthService {
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 
-    const session = await this.createUserSessionAndTokens(user, AUTH_PROVIDERS.LOCAL,device);
+    const session = await this.createUserSessionAndTokens(user, AUTH_PROVIDERS.LOCAL, device);
 
     this.logger.log(`User logged in: ${user.id}`);
 
@@ -435,16 +435,8 @@ export class AuthService {
    * then issues a new access + refresh token pair.
    */
   async refreshToken(
-    dto: RefreshTokenDto,
+    payload: RefreshTokenPayload,
   ): Promise<ApiResponse<RefreshTokenResponse>> {
-    const payload = this.jwtService.verify<{
-      userId: string;
-      username: string;
-      sessionId: string;
-    }>(dto.refreshToken, {
-      secret: JWT_CONFIG.refreshSecret,
-    });
-
     const session = await this.userSessionRepo.findOne({
       where: {
         sessionId: payload.sessionId,
@@ -456,41 +448,30 @@ export class AuthService {
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_REFRESH_TOKEN);
     }
 
-    const storedToken = await this.redisService.get(
-      `${REDIS_KEYS.REFRESH_TOKEN}:${payload.sessionId}`,
-    );
+    if (session.expiresAt < new Date()) {
+      throw new UnauthorizedException(AUTH_MESSAGES.SESSION_EXPIRED);
+    }
+
+    const key = `${REDIS_KEYS.REFRESH_TOKEN}:${payload.sessionId}`;
+
+    const storedToken = await this.redisService.get(key);
 
     if (!storedToken) {
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_REFRESH_TOKEN);
     }
+    await this.redisService.del(key);
+    const cleanPayload = {
+      userId: payload.userId,
+      username: payload.username,
+      sessionId: payload.sessionId,
+    };
+    const { accessToken, refreshToken } = this.generateJwtTokens(cleanPayload);
 
-    const isValid = dto.refreshToken === storedToken;
-
-    if (!isValid) {
-      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_REFRESH_TOKEN);
-    }
-    await this.redisService.del(
-      `${REDIS_KEYS.REFRESH_TOKEN}:${payload.sessionId}`,
-    );
-
-    const { accessToken: newAccessToken, refreshToken: newRefreshToken } =
-      this.generateJwtTokens({
-        userId: payload.userId,
-        username: payload.username,
-        sessionId: payload.sessionId,
-      });
-
-    // const newHashedRefreshToken = await bcrypt.hash(newRefreshToken, 10);
-
-    await this.redisService.set(
-      `${REDIS_KEYS.REFRESH_TOKEN}:${payload.sessionId}`,
-      newRefreshToken,
-      JWT_CONFIG.refreshExpiresIn,
-    );
+    await this.redisService.set(key, refreshToken, JWT_CONFIG.refreshExpiresIn);
 
     await this.userSessionRepo.update(
-      { sessionId: payload.sessionId, isActive: true },
-      { expiresAt: new Date(Date.now() + JWT_CONFIG.refreshExpiresIn * 1000) },
+      { sessionId: payload.sessionId },
+      { expiresAt: new Date(Date.now() + JWT_CONFIG.refreshExpiresIn * 1000)},
     );
 
     this.logger.log(`Refresh token rotated for user: ${payload.userId}`);
@@ -498,8 +479,8 @@ export class AuthService {
     return {
       message: AUTH_MESSAGES.REFRESH_TOKEN_SUCCESS,
       data: {
-        accessToken: newAccessToken,
-        refreshToken: newRefreshToken,
+        accessToken,
+        refreshToken,
       },
     };
   }
@@ -524,11 +505,16 @@ export class AuthService {
       throw new UnauthorizedException(AUTH_MESSAGES.OTP_NOT_VERIFIED);
     }
 
-    const user = await this.userRepo.findOne({
-      where: tempTokenData.email
-        ? { email: tempTokenData.email }
-        : { phone: tempTokenData.phoneNumber },
-    });
+    const user = await this.userRepo
+      .createQueryBuilder('user')
+      .where(
+        tempTokenData.email ? 'user.email = :email' : 'user.phone = :phone',
+        tempTokenData.email
+          ? { email: tempTokenData.email }
+          : { phone: tempTokenData.phoneNumber },
+      )
+      .addSelect('user.password')
+      .getOne();
 
     if (!user) {
       this.logger.warn(
@@ -537,7 +523,7 @@ export class AuthService {
       throw new NotFoundException(AUTH_MESSAGES.USER_NOT_FOUND);
     }
 
-    const samePassword = await bcrypt.compare(dto.newPassword, user.password);
+    const samePassword = user.password ? await bcrypt.compare(dto.newPassword, user.password) : false;
 
     if (samePassword) {
       this.logger.warn(`User tried resetting same password: ${identifier}`);
