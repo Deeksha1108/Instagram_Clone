@@ -11,9 +11,9 @@ export enum AttemptStatus {
 }
 
 export enum Gender {
-  MALE = 'male',
-  FEMALE = 'female',
-  OTHER = 'other',
+  MALE = 1,
+  FEMALE = 2,
+  OTHER = 3,
 }
 
 export enum OtpType {
