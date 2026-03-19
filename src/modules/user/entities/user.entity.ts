@@ -1,15 +1,17 @@
 import { Column, Entity, Index } from 'typeorm';
 import { BaseEntity } from 'src/common/entities/base.entity';
 import { AUTH_PROVIDERS } from 'src/common/constants/constants';
+import { Gender } from 'src/common/enum/enum.common';
 
 @Entity('users')
+@Index(['email', 'isVerified'])
+@Index(['phone', 'isVerified'])
+@Index(['username', 'isVerified'])
 export class User extends BaseEntity {
-  @Index()
-  @Column({ nullable: true, unique: true })
+  @Column({ nullable: true })
   email: string;
 
-  @Index()
-  @Column({ nullable: true, unique: true })
+  @Column({ nullable: true })
   phone: string;
 
   @Column({ default: false })
@@ -18,20 +20,20 @@ export class User extends BaseEntity {
   @Column({ nullable: true })
   fullName: string;
 
-  @Index()
-  @Column({ unique: true, nullable: true })
+  @Column()
   username: string;
 
   @Column({ nullable: true })
   age: number;
 
-  @Column({ nullable: true })
-  gender: string;
+  @Column({ type: 'smallint', nullable: true })
+  gender: Gender;
 
   @Column({ nullable: true, select: false })
   password: string;
 
-  @Column({ nullable: true, unique: true })
+  @Index()
+  @Column({ nullable: true })
   facebookId: string;
 
   @Column({

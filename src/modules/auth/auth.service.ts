@@ -73,79 +73,47 @@ export class AuthService {
   async sendOtp(dto: SendOtpDto): Promise<ApiResponse<SendOtpResponse>> {
     const identifier = this.getIdentifier(dto);
 
-    // Redis rate limit protection
-    await this.checkOtpRateLimit(identifier);
-    this.logger.log(`OTP request received for ${identifier} [${dto.type}]`);
+    await this.checkOtpRateLimit(`${identifier}:${dto.type}`);
 
-    /**
-     * Signup validation
-     */
-    if (dto.type === OtpType.SIGNUP) {
-      const existingUser = await this.userRepo.findOne({
-        where: dto.email ? { email: dto.email } : { phone: dto.phone },
-      });
+    const user = await this.userRepo.findOne({
+      where: dto.email ? { email: dto.email } : { phone: dto.phone },
+      select: ['id'],
+    });
 
-      if (existingUser) {
-        this.logger.warn(`Signup attempt with existing user: ${identifier}`);
-        await this.authAttemptRepo.save({
+    if (dto.type === OtpType.SIGNUP && user) {
+      this.authAttemptRepo
+        .save({
           email: dto.email,
           phone: dto.phone,
           attemptType: AttemptType.SIGNUP,
           status: AttemptStatus.USER_ALREADY_EXISTS,
-        });
-        throw new BadRequestException(AUTH_MESSAGES.USER_ALREADY_EXISTS);
-      }
+        })
+        .catch(() => {});
+
+      throw new BadRequestException(AUTH_MESSAGES.USER_ALREADY_EXISTS);
     }
 
-    /**
-     * Forgot password validation
-     */
-    if (dto.type === OtpType.FORGOT_PASSWORD) {
-      const user = await this.userRepo.findOne({
-        where: dto.email ? { email: dto.email } : { phone: dto.phone },
-      });
-
-      if (!user) {
-        this.logger.warn(
-          `Forgot password requested for non-existing user: ${identifier}`,
-        );
-        await this.authAttemptRepo.save({
+    if (dto.type === OtpType.FORGOT_PASSWORD && !user) {
+      this.authAttemptRepo
+        .save({
           email: dto.email,
           phone: dto.phone,
           attemptType: AttemptType.FORGOT_PASSWORD,
           status: AttemptStatus.INVALID_USER,
-        });
-        throw new NotFoundException(AUTH_MESSAGES.USER_NOT_FOUND);
-      }
+        })
+        .catch(() => {});
+
+      throw new NotFoundException(AUTH_MESSAGES.USER_NOT_FOUND);
     }
 
-    /**
-     * OTP bypass allowed only in dev or qa environment
-     */
     const bypassAllowed = this.isOtpBypassAllowed();
 
-    let otp: string;
+    const otp = bypassAllowed
+      ? COMMON_CONFIG.otp.bypassCode
+      : this.generateRandomOtp();
 
-    if (bypassAllowed) {
-      otp = COMMON_CONFIG.otp.bypassCode;
-      this.logger.warn(`OTP bypass active for ${identifier}`);
-    } else {
-      otp = this.generateRandomOtp();
+    const hashedOtp = await bcrypt.hash(otp, 6);
 
-      if (dto.email) {
-        await this.mailerService.sendOtpEmail(dto.email, otp);
-      }
-
-      if (dto.phone) {
-        // SMS integration here for future
-      }
-    }
-
-    const hashedOtp = await bcrypt.hash(otp, 10);
-
-    /**
-     * Store OTP session in Redis
-     */
     await this.redisService.set(
       `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
       {
@@ -156,6 +124,10 @@ export class AuthService {
       },
       AUTH_CONSTANTS.OTP_TTL_SECONDS,
     );
+
+    if (dto.email && !bypassAllowed) {
+      this.mailerService.sendOtpEmail(dto.email, otp).catch(() => {});
+    }
 
     const token = this.jwtService.sign(
       {
@@ -317,41 +289,39 @@ export class AuthService {
     dto: LoginDto,
     device: string,
   ): Promise<ApiResponse<LoginResponse>> {
-    const query = this.userRepo.createQueryBuilder('user');
-
+    let query;
     if (dto.email) {
-      query.where('user.email = :email', { email: dto.email });
+      query = { email: dto.email, isVerified: true };
     } else if (dto.phone) {
-      query.where('user.phone = :phone', { phone: dto.phone });
+      query = { phone: dto.phone, isVerified: true };
     } else {
-      query.where('user.username = :username', { username: dto.username });
+      query = { username: dto.username, isVerified: true };
     }
-    const user = await query.addSelect('user.password').getOne();
+    const user = await this.userRepo.findOne({
+      where: query,
+      select: ['id', 'password', 'username'],
+    });
 
     if (!user) {
-      await this.authAttemptRepo.save({
-        email: dto.email,
-        phone: dto.phone,
-        attemptType: AttemptType.LOGIN,
-        status: AttemptStatus.INVALID_USER,
-      });
+      this.authAttemptRepo.save({
+          email: dto.email,
+          phone: dto.phone,
+          attemptType: AttemptType.LOGIN,
+          status: AttemptStatus.INVALID_USER,
+        }).catch(() => {});
 
-      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
-    }
-
-    if (!user.isVerified) {
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 
     const passwordMatch = await bcrypt.compare(dto.password, user.password);
 
     if (!passwordMatch) {
-      await this.authAttemptRepo.save({
-        email: dto.email,
-        phone: dto.phone,
-        attemptType: AttemptType.LOGIN,
-        status: AttemptStatus.WRONG_PASSWORD,
-      });
+      this.authAttemptRepo.save({
+          email: dto.email,
+          phone: dto.phone,
+          attemptType: AttemptType.LOGIN,
+          status: AttemptStatus.WRONG_PASSWORD,
+        }).catch(() => {});
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 

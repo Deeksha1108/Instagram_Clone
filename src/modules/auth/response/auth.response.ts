@@ -10,6 +10,7 @@ export const AUTH_MESSAGES = {
   LOGIN_SUCCESS: 'Login successful',
   LOGOUT_SUCCESS: 'Logout successful',
   INVALID_CREDENTIALS: 'Invalid credentials',
+  INVALID_IDENTIFIER: 'Invalid identifier',
   SESSION_EXPIRED: 'Session expired. Please login again',
   USER_ALREADY_EXISTS: 'User already exists',
   USER_NOT_FOUND: 'User not found',
