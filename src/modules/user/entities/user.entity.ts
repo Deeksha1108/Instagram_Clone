@@ -8,10 +8,10 @@ import { Gender } from 'src/common/enum/enum.common';
 @Index(['phone', 'isVerified'])
 @Index(['username', 'isVerified'])
 export class User extends BaseEntity {
-  @Column({ nullable: true })
+  @Column({ nullable: true, unique: true })
   email: string;
 
-  @Column({ nullable: true })
+  @Column({ nullable: true, unique: true })
   phone: string;
 
   @Column({ default: false })
@@ -20,7 +20,7 @@ export class User extends BaseEntity {
   @Column({ nullable: true })
   fullName: string;
 
-  @Column()
+  @Column({ unique: true })
   username: string;
 
   @Column({ nullable: true })

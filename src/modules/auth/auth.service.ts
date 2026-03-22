@@ -35,7 +35,11 @@ import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MailerService } from 'src/shared/mailer/mailer.service';
 import { AuthAttempt } from '../user/entities/auth_attempts.entity';
-import { COMMON_CONFIG, NODE_ENV_TYPE } from 'src/config/common.config';
+import {
+  COMMON_CONFIG,
+  NODE_ENV_TYPE,
+  OTP_CONFIG,
+} from 'src/config/common.config';
 import {
   AttemptStatus,
   AttemptType,
@@ -72,8 +76,9 @@ export class AuthService {
    */
   async sendOtp(dto: SendOtpDto): Promise<ApiResponse<SendOtpResponse>> {
     const identifier = this.getIdentifier(dto);
+    const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${dto.type}`;
 
-    await this.checkOtpRateLimit(`${identifier}:${dto.type}`);
+    await this.checkOtpRateLimit(redisKey);
 
     const user = await this.userRepo.findOne({
       where: dto.email ? { email: dto.email } : { phone: dto.phone },
@@ -115,7 +120,7 @@ export class AuthService {
     const hashedOtp = await bcrypt.hash(otp, 6);
 
     await this.redisService.set(
-      `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
+      redisKey,
       {
         otp: hashedOtp,
         verified: false,
@@ -158,9 +163,8 @@ export class AuthService {
       email: tempTokenData.email,
       phone: tempTokenData.phoneNumber,
     });
-    const session = await this.redisService.get(
-      `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
-    );
+    const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${tempTokenData.type}`;
+    const session = await this.redisService.get(redisKey);
 
     if (!session) {
       this.logger.warn(`OTP session expired for ${identifier}`);
@@ -171,9 +175,6 @@ export class AuthService {
       this.logger.warn(`OTP already verified attempt for ${identifier}`);
       throw new BadRequestException(AUTH_MESSAGES.OTP_ALREADY_VERIFIED);
     }
-    /**
-     * Brute force protection
-     */
     if (session.verifyAttempts >= COMMON_CONFIG.otp.maxVerifyAttempts) {
       this.logger.warn(`OTP verify attempts exceeded for ${identifier}`);
       throw new ForbiddenException(AUTH_MESSAGES.TOO_MANY_VERIFY_OTP_ATTEMPTS);
@@ -185,16 +186,17 @@ export class AuthService {
 
     if (bypassAllowed && dto.otp === COMMON_CONFIG.otp.bypassCode) {
       isMatch = true;
+    } else if (dto.otp.length !== OTP_CONFIG.LENGTH) {
+      isMatch = false;
     } else {
       isMatch = await bcrypt.compare(dto.otp, session.otp);
     }
     if (!isMatch) {
+      session.verifyAttempts += 1;
+
       await this.redisService.set(
-        `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
-        {
-          ...session,
-          verifyAttempts: session.verifyAttempts + 1,
-        },
+        redisKey,
+        session,
         AUTH_CONSTANTS.OTP_TTL_SECONDS,
       );
 
@@ -202,10 +204,11 @@ export class AuthService {
 
       throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP);
     }
+    session.verified = true;
 
     await this.redisService.set(
-      `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
-      { ...session, verified: true },
+      redisKey,
+      session,
       AUTH_CONSTANTS.OTP_TTL_SECONDS,
     );
     this.logger.log(`OTP verified successfully for ${identifier}`);
@@ -229,30 +232,30 @@ export class AuthService {
       email: tempTokenData.email,
       phone: tempTokenData.phoneNumber,
     });
-    const otpSsession = await this.redisService.get(
-      `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
-    );
+    const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${tempTokenData.type}`;
 
-    if (!otpSsession) {
+    const otpSession = await this.redisService.get(redisKey);
+
+    if (!otpSession) {
       throw new NotFoundException(AUTH_MESSAGES.OTP_SESSION_EXPIRED);
     }
 
-    if (otpSsession.type === OtpType.FORGOT_PASSWORD) {
+    if (otpSession.type === OtpType.FORGOT_PASSWORD) {
       throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP_TYPE);
     }
 
-    if (!otpSsession.verified) {
+    if (!otpSession.verified) {
       throw new UnauthorizedException(AUTH_MESSAGES.OTP_NOT_VERIFIED);
     }
 
-    const existingUser = await this.userRepo.findOne({
+    const existingUser = await this.userRepo.exist({
       where: { username: dto.username },
     });
     if (existingUser) {
       this.logger.warn(`Username already taken: ${dto.username}`);
       throw new BadRequestException(AUTH_MESSAGES.USERNAME_TAKEN);
     }
-    const hashedPassword = await bcrypt.hash(dto.password, 10);
+    const hashedPassword = await bcrypt.hash(dto.password, 8);
 
     const user = this.userRepo.create({
       ...(tempTokenData.email && { email: tempTokenData.email }),
@@ -266,9 +269,7 @@ export class AuthService {
     });
 
     await this.userRepo.save(user);
-    await this.redisService.del(
-      `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
-    );
+    await this.redisService.del(redisKey);
 
     const session = await this.createUserSessionAndTokens(
       user,
@@ -303,12 +304,14 @@ export class AuthService {
     });
 
     if (!user) {
-      this.authAttemptRepo.save({
+      this.authAttemptRepo
+        .save({
           email: dto.email,
           phone: dto.phone,
           attemptType: AttemptType.LOGIN,
           status: AttemptStatus.INVALID_USER,
-        }).catch(() => {});
+        })
+        .catch(() => {});
 
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
@@ -316,16 +319,22 @@ export class AuthService {
     const passwordMatch = await bcrypt.compare(dto.password, user.password);
 
     if (!passwordMatch) {
-      this.authAttemptRepo.save({
+      this.authAttemptRepo
+        .save({
           email: dto.email,
           phone: dto.phone,
           attemptType: AttemptType.LOGIN,
           status: AttemptStatus.WRONG_PASSWORD,
-        }).catch(() => {});
+        })
+        .catch(() => {});
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 
-    const session = await this.createUserSessionAndTokens(user, AUTH_PROVIDERS.LOCAL, device);
+    const session = await this.createUserSessionAndTokens(
+      user,
+      AUTH_PROVIDERS.LOCAL,
+      device,
+    );
 
     this.logger.log(`User logged in: ${user.id}`);
 
@@ -350,7 +359,9 @@ export class AuthService {
         `${process.env.FACEBOOK_GRAPH_URL}?fields=${process.env.FACEBOOK_FIELDS}&access_token=${dto.accessToken}`,
       );
     } catch (e) {
-      throw new UnauthorizedException(AUTH_MESSAGES.FACEBOOK_VERIFICATION_FAILED,);
+      throw new UnauthorizedException(
+        AUTH_MESSAGES.FACEBOOK_VERIFICATION_FAILED,
+      );
     }
 
     if (!response.ok) {
@@ -362,20 +373,21 @@ export class AuthService {
     if (!profile?.id) {
       throw new UnauthorizedException(AUTH_MESSAGES.FACEBOOK_USER_NOT_VERIFIED);
     }
+    const whereConditions: any[] = [{ facebookId: profile.id }];
+    if (profile.email) {
+      whereConditions.push({ email: profile.email });
+    }
     let user = await this.userRepo.findOne({
-      where: { facebookId: profile.id },
+      where: whereConditions,
+      select: ['id', 'email', 'facebookId', 'provider'],
     });
-    if (!user && profile.email) {
-      user = await this.userRepo.findOne({
-        where: { email: profile.email },
+    if (user && !user.facebookId) {
+      await this.userRepo.update(user.id, {
+        facebookId: profile.id,
+        provider: AUTH_PROVIDERS.FACEBOOK,
       });
-
-      if (user) {
-        user.facebookId = profile.id;
-        user.provider = AUTH_PROVIDERS.FACEBOOK;
-
-        await this.userRepo.save(user);
-      }
+      user.facebookId = profile.id;
+      user.provider = AUTH_PROVIDERS.FACEBOOK;
     }
     if (!user) {
       user = this.userRepo.create({
@@ -424,14 +436,9 @@ export class AuthService {
 
     const key = `${REDIS_KEYS.REFRESH_TOKEN}:${payload.sessionId}`;
 
-    const storedToken = await this.redisService.get(key);
-
-    if (!storedToken) {
-      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_REFRESH_TOKEN);
-    }
     await this.redisService.del(key);
     const cleanPayload = {
-      userId: payload.userId,
+      userId: session.userId,
       username: payload.username,
       sessionId: payload.sessionId,
     };
@@ -439,12 +446,11 @@ export class AuthService {
 
     await this.redisService.set(key, refreshToken, JWT_CONFIG.refreshExpiresIn);
 
-    await this.userSessionRepo.update(
-      { sessionId: payload.sessionId },
-      { expiresAt: new Date(Date.now() + JWT_CONFIG.refreshExpiresIn * 1000)},
-    );
+    await this.userSessionRepo.update(session.id, {
+      expiresAt: new Date(Date.now() + JWT_CONFIG.refreshExpiresIn * 1000),
+    });
 
-    this.logger.log(`Refresh token rotated for user: ${payload.userId}`);
+    this.logger.log(`Refresh token rotated for user: ${session.userId}`);
 
     return {
       message: AUTH_MESSAGES.REFRESH_TOKEN_SUCCESS,
@@ -467,24 +473,20 @@ export class AuthService {
       email: tempTokenData.email,
       phone: tempTokenData.phoneNumber,
     });
-    const session = await this.redisService.get(
-      `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
-    );
+    const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${tempTokenData.type}`;
+
+    const session = await this.redisService.get(redisKey);
 
     if (!session?.verified || session.type !== OtpType.FORGOT_PASSWORD) {
       throw new UnauthorizedException(AUTH_MESSAGES.OTP_NOT_VERIFIED);
     }
 
-    const user = await this.userRepo
-      .createQueryBuilder('user')
-      .where(
-        tempTokenData.email ? 'user.email = :email' : 'user.phone = :phone',
-        tempTokenData.email
-          ? { email: tempTokenData.email }
-          : { phone: tempTokenData.phoneNumber },
-      )
-      .addSelect('user.password')
-      .getOne();
+    const user = await this.userRepo.findOne({
+      where: tempTokenData.email
+        ? { email: tempTokenData.email }
+        : { phone: tempTokenData.phoneNumber },
+      select: ['id', 'password'],
+    });
 
     if (!user) {
       this.logger.warn(
@@ -493,22 +495,21 @@ export class AuthService {
       throw new NotFoundException(AUTH_MESSAGES.USER_NOT_FOUND);
     }
 
-    const samePassword = user.password ? await bcrypt.compare(dto.newPassword, user.password) : false;
+    const samePassword = user.password
+      ? await bcrypt.compare(dto.newPassword, user.password)
+      : false;
 
     if (samePassword) {
       this.logger.warn(`User tried resetting same password: ${identifier}`);
       throw new BadRequestException(AUTH_MESSAGES.PASSWORD_MUST_BE_DIFFERENT);
     }
 
-    const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+    const hashedPassword = await bcrypt.hash(dto.newPassword, 8);
 
-    await this.userRepo.update(user.id, {
-      password: hashedPassword,
-    });
-
-    await this.redisService.del(
-      `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`,
-    );
+    await Promise.all([
+      this.userRepo.update(user.id, { password: hashedPassword }),
+      this.redisService.del(redisKey),
+    ]);
     this.logger.log(`Password reset successful for user: ${user.id}`);
     return {
       message: AUTH_MESSAGES.PASSWORD_RESET_SUCCESS,
@@ -614,13 +615,15 @@ export class AuthService {
   async logout(sessionId: string): Promise<ApiResponse<null>> {
     const session = await this.userSessionRepo.findOne({
       where: { sessionId, isActive: true },
+      select: ['id', 'sessionId'],
     });
     if (!session) {
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_SESSION);
     }
-    await this.userSessionRepo.update({ sessionId }, { isActive: false });
-
-    await this.redisService.del(`${REDIS_KEYS.REFRESH_TOKEN}:${sessionId}`);
+    await Promise.all([
+      this.userSessionRepo.update(session.id, { isActive: false }),
+      this.invalidateSessions([session.sessionId]),
+    ]);
 
     this.logger.log(`Session logged out: ${sessionId}`);
 
@@ -636,18 +639,25 @@ export class AuthService {
   async logoutAll(userId: string): Promise<ApiResponse<null>> {
     const sessions = await this.userSessionRepo.find({
       where: { userId, isActive: true },
+      select: ['sessionId'],
     });
 
-    for (const session of sessions) {
-      await this.redisService.del(
-        `${REDIS_KEYS.REFRESH_TOKEN}:${session.sessionId}`,
-      );
+    if (!sessions.length) {
+      return {
+        message: AUTH_MESSAGES.LOGOUT_SUCCESS,
+        data: null,
+      };
     }
 
-    await this.userSessionRepo.update(
-      { userId, isActive: true },
-      { isActive: false },
-    );
+    const sessionIds = sessions.map((s) => s.sessionId);
+
+    await Promise.all([
+      this.userSessionRepo.update(
+        { userId, isActive: true },
+        { isActive: false },
+      ),
+      this.invalidateSessions(sessionIds),
+    ]);
     this.logger.log(`All sessions logged out for user: ${userId}`);
 
     return { message: AUTH_MESSAGES.LOGOUT_SUCCESS, data: null };
@@ -757,5 +767,15 @@ export class AuthService {
       accessToken,
       refreshToken,
     };
+  }
+
+  private async invalidateSessions(sessionIds: string[]): Promise<void> {
+    if (!sessionIds.length) return;
+
+    await Promise.all(
+      sessionIds.map((id) =>
+        this.redisService.del(`${REDIS_KEYS.REFRESH_TOKEN}:${id}`),
+      ),
+    );
   }
 }
