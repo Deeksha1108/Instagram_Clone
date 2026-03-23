@@ -28,4 +28,5 @@ export const AUTH_MESSAGES = {
   INVALID_FACEBOOK_TOKEN: 'Invalid Facebook token',
   FACEBOOK_USER_NOT_VERIFIED: 'Unable to verify Facebook user',
   FACEBOOK_VERIFICATION_FAILED: 'Facebook verification failed',
+  USER_UNDERAGE: 'User must be at least 18 years old',
 };

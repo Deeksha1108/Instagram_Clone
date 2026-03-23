@@ -26,6 +26,9 @@ export class User extends BaseEntity {
   @Column({ nullable: true })
   age: number;
 
+  @Column({ type: 'date', nullable: true })
+  dateOfBirth: Date;
+
   @Column({ type: 'smallint', nullable: true })
   gender: Gender;
 
