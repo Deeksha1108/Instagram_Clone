@@ -1,14 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
+  IsDateString,
   IsEnum,
-  IsNumber,
   IsString,
-  Max,
   MaxLength,
-  Min,
   MinLength,
+  Validate,
 } from 'class-validator';
 import { Gender } from 'src/common/enum/enum.common';
+import { IsAdultValidator } from 'src/common/validators/dob.validator';
 
 export class CreateProfileDto {
   @ApiProperty({ example: 'Deeksha Singh' })
@@ -19,14 +19,13 @@ export class CreateProfileDto {
   @IsString()
   username: string;
 
-  @ApiProperty({ example: 20 })
-  @IsNumber()
-  @Min(18, { message: 'You must be at least 18 years old' })
-  @Max(100, { message: 'Age must not be greater than 100' })
-  age: number;
+  @ApiProperty({ example: '2000-01-01' })
+  @IsDateString({}, { message: 'Invalid date format' })
+  @Validate(IsAdultValidator)
+  dateOfBirth: string;
 
   @ApiProperty({ example: 'female' })
-  @IsEnum(Gender, { message: 'Gender must be male, female or other' })
+  @IsEnum(Gender, { message: 'Gender must be 1, 2 or 3' })
   gender: Gender;
 
   @ApiProperty({ example: 'Pass@123' })

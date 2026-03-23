@@ -257,12 +257,19 @@ export class AuthService {
     }
     const hashedPassword = await bcrypt.hash(dto.password, 8);
 
+    const dob = new Date(dto.dateOfBirth);
+    const age = this.calculateAge(dob);
+
+    if (age < 18) {
+      throw new BadRequestException(AUTH_MESSAGES.USER_UNDERAGE);
+    }
     const user = this.userRepo.create({
       ...(tempTokenData.email && { email: tempTokenData.email }),
       ...(tempTokenData.phoneNumber && { phone: tempTokenData.phoneNumber }),
       fullName: dto.fullName,
       username: dto.username,
-      age: dto.age,
+      age: age,
+      dateOfBirth: dob,
       gender: dto.gender,
       password: hashedPassword,
       isVerified: true,
@@ -777,5 +784,18 @@ export class AuthService {
         this.redisService.del(`${REDIS_KEYS.REFRESH_TOKEN}:${id}`),
       ),
     );
+  }
+
+  private calculateAge(dob: Date): number {
+    const today = new Date();
+    let age = today.getFullYear() - dob.getFullYear();
+
+    if (
+      today.getMonth() < dob.getMonth() ||
+      (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate())
+    ) {
+      age--;
+    }
+    return age;
   }
 }
