@@ -20,3 +20,13 @@ export enum OtpType {
   SIGNUP = 'SIGNUP',
   FORGOT_PASSWORD = 'FORGOT_PASSWORD',
 }
+
+export enum PostType {
+  OWN = 'OWN',
+  SAVED = 'SAVED',
+  TAGGED = 'TAGGED',
+}
+
+export const POST_PAGINATION = {
+  LIMIT: 12,
+};
