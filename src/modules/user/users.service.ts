@@ -9,6 +9,7 @@ import { LessThan, Repository } from 'typeorm';
 import { USER_MESSAGES } from './response/user.response';
 import { Post } from '../post/entities/post.entity';
 import { GetMyPostsDto } from './dto/myPosts.dto';
+import { EditProfileDto } from './dto/editProfile.dto';
 
 @Injectable()
 export class UserService {
@@ -70,6 +71,35 @@ export class UserService {
     }
   }
 
+  async editProfile(userId: string, dto: EditProfileDto) {
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException(USER_MESSAGES.USER_NOT_FOUND);
+    }
+
+    if (dto.bio !== undefined) user.bio = dto.bio;
+    if (dto.gender !== undefined) user.gender = dto.gender;
+    if (dto.showSuggestions !== undefined)
+      user.showSuggestions = dto.showSuggestions;
+
+    await this.userRepo.save(user);
+
+    return {
+      message: USER_MESSAGES.PROFILE_UPDATED,
+      data: {
+        bio: user.bio,
+        gender: user.gender,
+        showSuggestions: user.showSuggestions,
+      },
+    };
+  }
+
+  /**
+   * Helper Functions
+   */
   private async getOwnPosts(userId: string, cursor?: string) {
     return this.buildPostQuery(
       (qb) => qb.andWhere('post.userId = :userId', { userId }),

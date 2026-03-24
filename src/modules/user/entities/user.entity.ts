@@ -58,7 +58,6 @@ export class User extends BaseEntity {
   @Column({ default: false })
   isPrivate: boolean;
 
-  // OPTIONAL (for performance - denormalization)
   @Column({ default: 0 })
   postsCount: number;
 
@@ -76,4 +75,7 @@ export class User extends BaseEntity {
 
   @OneToMany(() => PostTag, (pt) => pt.user)
   taggedPosts: PostTag[];
+
+  @Column({ default: true })
+  showSuggestions: boolean;
 }

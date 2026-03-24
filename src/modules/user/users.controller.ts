@@ -1,8 +1,9 @@
 import {
+  Body,
   Controller,
   Get,
   HttpCode,
-  Param,
+  Patch,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -11,6 +12,7 @@ import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { UserService } from './users.service';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { GetMyPostsDto } from './dto/myPosts.dto';
+import { EditProfileDto } from './dto/editProfile.dto';
 
 @ApiTags('User Module')
 @Controller('users')
@@ -36,5 +38,16 @@ export class UserController {
     @Query() dto: GetMyPostsDto,
   ) {
     return this.userService.getMyPosts(userId, dto);
+  }
+
+  @Patch('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Edit user profile' })
+  editProfile(
+    @CurrentUser('userId') userId: string,
+    @Body() dto: EditProfileDto,
+  ) {
+    return this.userService.editProfile(userId, dto);
   }
 }
