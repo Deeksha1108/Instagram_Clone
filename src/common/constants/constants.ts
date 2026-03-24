@@ -24,3 +24,7 @@ export const USER_LIMITS = {
 export const USER_DEFAULTS = {
   SHOW_SUGGESTIONS: true,
 };
+
+export const PAGINATION = {
+  LIMIT: 12,
+};

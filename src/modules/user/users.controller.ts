@@ -13,6 +13,7 @@ import { UserService } from './users.service';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { GetMyPostsDto } from './dto/myPosts.dto';
 import { EditProfileDto } from './dto/editProfile.dto';
+import { GetConnectionsDto } from './dto/getConnections.dto';
 
 @ApiTags('User Module')
 @Controller('users')
@@ -49,5 +50,17 @@ export class UserController {
     @Body() dto: EditProfileDto,
   ) {
     return this.userService.editProfile(userId, dto);
+  }
+
+  @Get('connections')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get followers / following list (paginated)' })
+  @HttpCode(200)
+  getConnections(
+    @CurrentUser('userId') userId: string,
+    @Query() dto: GetConnectionsDto,
+  ) {
+    return this.userService.getConnections(userId, dto);
   }
 }

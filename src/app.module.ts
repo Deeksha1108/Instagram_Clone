@@ -9,6 +9,7 @@ import { UserModule } from './modules/user/users.module';
 import { PostService } from './modules/post/post.service';
 import { PostController } from './modules/post/post.controller';
 import { PostModule } from './modules/post/post.module';
+import { FollowModule } from './modules/follow/follow.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { PostModule } from './modules/post/post.module';
     AuthModule,
     UserModule,
     PostModule,
+    FollowModule,
     DatabaseModule,
     LoggerModule,
   ],

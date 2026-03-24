@@ -5,6 +5,7 @@ import { Gender } from 'src/common/enum/enum.common';
 import { SavedPost } from 'src/modules/post/entities/saved-post.entity';
 import { PostTag } from 'src/modules/post/entities/post-tag.entity';
 import { Post } from 'src/modules/post/entities/post.entity';
+import { Follow } from 'src/modules/follow/entities/follow.entity';
 
 @Entity('users')
 @Index(['email', 'isVerified'])
@@ -67,6 +68,10 @@ export class User extends BaseEntity {
   @Column({ default: 0 })
   followingCount: number;
 
+  @Column({ default: true })
+  showSuggestions: boolean;
+
+  // RELATIONS
   @OneToMany(() => Post, (post) => post.user)
   posts: Post[];
 
@@ -76,6 +81,11 @@ export class User extends BaseEntity {
   @OneToMany(() => PostTag, (pt) => pt.user)
   taggedPosts: PostTag[];
 
-  @Column({ default: true })
-  showSuggestions: boolean;
+  // People who follow me
+  @OneToMany(() => Follow, (f) => f.following)
+  followers: Follow[];
+
+  // People I follow
+  @OneToMany(() => Follow, (f) => f.follower)
+  following: Follow[];
 }

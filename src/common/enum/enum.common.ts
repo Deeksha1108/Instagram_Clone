@@ -27,6 +27,7 @@ export enum PostType {
   TAGGED = 'TAGGED',
 }
 
-export const POST_PAGINATION = {
-  LIMIT: 12,
-};
+export enum ConnectionType {
+  FOLLOWERS = 'FOLLOWERS',
+  FOLLOWING = 'FOLLOWING',
+}

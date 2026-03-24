@@ -5,11 +5,15 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
-import { LessThan, Repository } from 'typeorm';
+import { LessThan, Repository, SelectQueryBuilder } from 'typeorm';
 import { USER_MESSAGES } from './response/user.response';
 import { Post } from '../post/entities/post.entity';
 import { GetMyPostsDto } from './dto/myPosts.dto';
 import { EditProfileDto } from './dto/editProfile.dto';
+import { GetConnectionsDto } from './dto/getConnections.dto';
+import { PAGINATION } from 'src/common/constants/constants';
+import { buildPaginatedResponse } from 'src/common/utils/pagination.util';
+import { ConnectionType, PostType } from 'src/common/enum/enum.common';
 
 @Injectable()
 export class UserService {
@@ -22,7 +26,8 @@ export class UserService {
   ) {}
 
   /**
-   * Get top profile data (VERY LIGHT QUERY)
+   * Fetch logged-in user's profile (lightweight query)
+   * Only required fields are selected to reduce DB load
    */
   async getMyProfile(userId: string) {
     const user = await this.userRepo.findOne({
@@ -51,19 +56,20 @@ export class UserService {
   }
 
   /**
-   * Get posts with cursor pagination (SCALABLE)
+   * Entry point for fetching posts based on type
+   * Delegates to specific handlers to keep logic modular
    */
   async getMyPosts(userId: string, dto: GetMyPostsDto) {
     const { type, cursor } = dto;
 
     switch (type) {
-      case 'OWN':
+      case PostType.OWN:
         return this.getOwnPosts(userId, cursor);
 
-      case 'SAVED':
+      case PostType.SAVED:
         return this.getSavedPosts(userId, cursor);
 
-      case 'TAGGED':
+      case PostType.TAGGED:
         return this.getTaggedPosts(userId, cursor);
 
       default:
@@ -71,6 +77,9 @@ export class UserService {
     }
   }
 
+  /**
+   * Update profile fields (partial update)
+   */
   async editProfile(userId: string, dto: EditProfileDto) {
     const user = await this.userRepo.findOne({
       where: { id: userId },
@@ -98,7 +107,25 @@ export class UserService {
   }
 
   /**
-   * Helper Functions
+   * Entry point for followers/following
+   */
+  async getConnections(userId: string, dto: GetConnectionsDto) {
+    const { type, cursor } = dto;
+
+    switch (type) {
+      case ConnectionType.FOLLOWERS:
+        return this.getFollowers(userId, cursor);
+
+      case ConnectionType.FOLLOWING:
+        return this.getFollowing(userId, cursor);
+
+      default:
+        throw new BadRequestException(USER_MESSAGES.INVALID_CONNECTION_TYPE);
+    }
+  }
+
+  /**
+   * Posts Helper Functions
    */
   private async getOwnPosts(userId: string, cursor?: string) {
     return this.buildPostQuery(
@@ -111,8 +138,8 @@ export class UserService {
     return this.buildPostQuery(
       (qb) =>
         qb
-          .innerJoin('saved_posts', 'sp', 'sp.post_id = post.id')
-          .andWhere('sp.user_id = :userId', { userId }),
+          .innerJoin('post.savedBy', 'sp')
+          .andWhere('sp.userId = :userId', { userId }),
       cursor,
     );
   }
@@ -121,14 +148,21 @@ export class UserService {
     return this.buildPostQuery(
       (qb) =>
         qb
-          .innerJoin('post_tags', 'pt', 'pt.post_id = post.id')
-          .andWhere('pt.user_id = :userId', { userId }),
+          .innerJoin('post.taggedUsers', 'pt')
+          .andWhere('pt.userId = :userId', { userId }),
       cursor,
     );
   }
 
-  private async buildPostQuery(filterFn: (qb: any) => any, cursor?: string) {
-    const limit = 12;
+  /**
+   * Core reusable pagination query builder for posts
+   * Implements cursor-based pagination (scalable)
+   */
+  private async buildPostQuery(
+    filterFn: (qb: SelectQueryBuilder<Post>) => SelectQueryBuilder<Post>,
+    cursor?: string,
+  ) {
+    const limit = PAGINATION.LIMIT;
 
     let qb = this.postRepo
       .createQueryBuilder('post')
@@ -138,6 +172,10 @@ export class UserService {
 
     if (cursor) {
       const [createdAt, id] = cursor.split('_');
+
+      if (!createdAt || !id) {
+        throw new BadRequestException(USER_MESSAGES.INVALID_CURSOR);
+      }
 
       qb = qb.andWhere(
         `(post.createdAt < :createdAt OR 
@@ -155,16 +193,98 @@ export class UserService {
       .select(['post.id', 'post.imageUrl', 'post.createdAt'])
       .getMany();
 
-    const lastPost = posts[posts.length - 1];
+    const result = buildPaginatedResponse(posts, limit);
 
     return {
       message: USER_MESSAGES.POSTS_FETCHED,
       data: {
-        posts,
-        nextCursor: lastPost
-          ? `${lastPost.createdAt.toISOString()}_${lastPost.id}`
-          : null,
-        hasMore: posts.length === limit,
+        posts: result.items,
+        nextCursor: result.nextCursor,
+        hasMore: result.hasMore,
+      },
+    };
+  }
+
+  /**
+   * Connection Helpers
+   * Followers = users who follow me
+   */
+  private async getFollowers(userId: string, cursor?: string) {
+    return this.buildConnectionQuery(
+      (qb) =>
+        qb
+          .innerJoin('user.followers', 'f')
+          .innerJoin('f.follower', 'followerUser')
+          .andWhere('f.followingId = :userId', { userId }),
+      cursor,
+    );
+  }
+
+  /**
+   * Following = users I follow
+   */
+  private async getFollowing(userId: string, cursor?: string) {
+    return this.buildConnectionQuery(
+      (qb) =>
+        qb
+          .innerJoin('user.following', 'f')
+          .innerJoin('f.following', 'followingUser')
+          .andWhere('f.followerId = :userId', { userId }),
+      cursor,
+    );
+  }
+
+  /**
+   * Reusable pagination logic for connections
+   */
+  private async buildConnectionQuery(
+    filterFn: (qb: SelectQueryBuilder<User>) => SelectQueryBuilder<User>,
+    cursor?: string,
+  ) {
+    const limit = PAGINATION.LIMIT;
+
+    let qb = this.userRepo
+      .createQueryBuilder('user')
+      .orderBy('user.createdAt', 'DESC')
+      .addOrderBy('user.id', 'DESC')
+      .take(limit);
+
+    if (cursor) {
+      const [createdAt, id] = cursor.split('_');
+
+      if (!createdAt || !id) {
+        throw new BadRequestException(USER_MESSAGES.INVALID_CURSOR);
+      }
+      qb = qb.andWhere(
+        `(user.createdAt < :createdAt OR 
+      (user.createdAt = :createdAt AND user.id < :id))`,
+        {
+          createdAt: new Date(createdAt),
+          id,
+        },
+      );
+    }
+
+    qb = filterFn(qb);
+
+    const users = await qb
+      .select([
+        'user.id',
+        'user.username',
+        'user.fullName',
+        'user.profilePicture',
+        'user.createdAt',
+      ])
+      .getMany();
+
+    const result = buildPaginatedResponse(users, limit);
+
+    return {
+      message: USER_MESSAGES.CONNECTIONS_FETCHED,
+      data: {
+        users: result.items,
+        nextCursor: result.nextCursor,
+        hasMore: result.hasMore,
       },
     };
   }
