@@ -11,37 +11,41 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { UserService } from './users.service';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
-import { GetMyPostsDto } from './dto/myPosts.dto';
 import { EditProfileDto } from './dto/editProfile.dto';
 import { GetConnectionsDto } from './dto/getConnections.dto';
+import { GetPostsDto } from './dto/posts.dto';
+import { GetProfileDto } from './dto/userProfile.dto';
 
 @ApiTags('User Module')
 @Controller('users')
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
-  @Get('me')
+  @Get('profile')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get logged-in user profile (top section)' })
+  @ApiOperation({ summary: 'Get profile (self or other user)' })
   @HttpCode(200)
-  getMyProfile(@CurrentUser('userId') userId: string) {
-    return this.userService.getMyProfile(userId);
-  }
-
-  @Get('me/posts')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get logged-in user posts (paginated)' })
-  @HttpCode(200)
-  getMyPosts(
-    @CurrentUser('userId') userId: string,
-    @Query() dto: GetMyPostsDto,
+  getProfile(
+    @CurrentUser('userId') loggedInUserId: string,
+    @Query() dto: GetProfileDto,
   ) {
-    return this.userService.getMyPosts(userId, dto);
+    return this.userService.getProfile(loggedInUserId, dto.userId);
   }
 
-  @Patch('me')
+  @Get('posts')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get posts (self or other user)' })
+  @HttpCode(200)
+  getPosts(
+    @CurrentUser('userId') loggedInUserId: string,
+    @Query() dto: GetPostsDto,
+  ) {
+    return this.userService.getUserPosts(loggedInUserId, dto);
+  }
+
+  @Patch()
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Edit user profile' })

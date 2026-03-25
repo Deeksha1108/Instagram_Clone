@@ -7,4 +7,5 @@ export const USER_MESSAGES = {
   INVALID_CONNECTION_TYPE: 'Invalid connection type',
   INVALID_CURSOR: 'Invalid cursor',
   PROFILE_UPDATED: 'Profile updated successfully',
+  SAVED_POSTS_FORBIDDEN: 'Cannot access saved posts of other users',
 };
