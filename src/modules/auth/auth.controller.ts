@@ -27,6 +27,8 @@ import { FacebookLoginDto } from './dto/facebook-login.dto';
 import { DeviceHeader } from 'src/common/decorators/device.decorator';
 import { JwtRefreshGuard } from 'src/common/guards/jwt-refresh.guard';
 import type { RefreshTokenPayload } from './interfaces/auth-response.interface';
+import { AUTH_MESSAGES } from './response/auth.response';
+import { ResponseMessage } from 'src/common/decorators/response.decorator';
 
 @ApiTags('Auth Module')
 @Controller('auth')
@@ -38,6 +40,7 @@ export class AuthController {
   @ApiBasicAuth('BasicAuth')
   @ApiOperation({ summary: 'Send OTP using email or phone' })
   @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.OTP_SENT)
   sendOtp(@Body() dto: SendOtpDto) {
     return this.authService.sendOtp(dto);
   }
@@ -49,6 +52,7 @@ export class AuthController {
     summary: 'Verify OTP — pass token from sendOtp in Authorization header',
   })
   @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.OTP_VERIFIED)
   verifyOtp(@Body() dto: VerifyOtpDto, @Req() req: RequestWithTempToken) {
     return this.authService.verifyOtp(dto, req.tempTokenData);
   }
@@ -58,6 +62,7 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create user profile after OTP verification' })
   @HttpCode(201)
+  @ResponseMessage(AUTH_MESSAGES.PROFILE_CREATED)
   createProfile(
     @Body() dto: CreateProfileDto,
     @Req() req: RequestWithTempToken,
@@ -71,6 +76,7 @@ export class AuthController {
   @ApiBasicAuth('BasicAuth')
   @ApiOperation({ summary: 'Login with email/phone/username and password' })
   @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.LOGIN_SUCCESS)
   login(@Body() dto: LoginDto, @DeviceHeader() device: string) {
     return this.authService.login(dto, device);
   }
@@ -80,6 +86,7 @@ export class AuthController {
   @ApiBasicAuth('BasicAuth')
   @ApiOperation({ summary: 'Login or signup via Facebook' })
   @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.LOGIN_SUCCESS)
   loginWithFacebook(@Body() dto: FacebookLoginDto, @DeviceHeader() device: string) {
     return this.authService.facebookLogin(dto, device);
   }
@@ -89,6 +96,7 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Reset password using phone or email' })
   @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.PASSWORD_RESET_SUCCESS)
   resetPassword(
     @Body() dto: ResetPasswordDto,
     @Req() req: RequestWithTempToken,
@@ -101,6 +109,7 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({summary: 'Resend OTP using temp token after initial sendOtp'})
   @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.OTP_SENT)
   resendOtp(@Req() req: RequestWithTempToken) {
     return this.authService.resendOtp(req.tempTokenData);
   }
@@ -110,6 +119,7 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Refresh access token' })
   @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.REFRESH_TOKEN_SUCCESS)
   refreshToken(@CurrentUser() user: RefreshTokenPayload) {
     return this.authService.refreshToken(user);
   }
@@ -119,6 +129,7 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Logout current device' })
   @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.LOGOUT_SUCCESS)
   logout(@CurrentUser('sessionId') sessionId: string) {
     return this.authService.logout(sessionId);
   }
@@ -128,6 +139,7 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Logout user from all devices' })
   @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.LOGOUT_SUCCESS)
   logoutAll(@CurrentUser('userId') userId: string) {
     return this.authService.logoutAll(userId);
   }

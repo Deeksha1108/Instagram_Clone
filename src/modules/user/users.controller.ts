@@ -15,17 +15,20 @@ import { EditProfileDto } from './dto/editProfile.dto';
 import { GetConnectionsDto } from './dto/getConnections.dto';
 import { GetPostsDto } from './dto/posts.dto';
 import { GetProfileDto } from './dto/userProfile.dto';
+import { ResponseMessage } from 'src/common/decorators/response.decorator';
+import { USER_MESSAGES } from './response/user.response';
 
 @ApiTags('User Module')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
 @Controller('users')
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
   @Get('profile')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
   @ApiOperation({ summary: 'Get profile (self or other user)' })
   @HttpCode(200)
+  @ResponseMessage(USER_MESSAGES.PROFILE_FETCHED)
   getProfile(
     @CurrentUser('userId') loggedInUserId: string,
     @Query() dto: GetProfileDto,
@@ -34,10 +37,9 @@ export class UserController {
   }
 
   @Get('posts')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
   @ApiOperation({ summary: 'Get posts (self or other user)' })
   @HttpCode(200)
+  @ResponseMessage(USER_MESSAGES.POSTS_FETCHED)
   getPosts(
     @CurrentUser('userId') loggedInUserId: string,
     @Query() dto: GetPostsDto,
@@ -45,10 +47,10 @@ export class UserController {
     return this.userService.getUserPosts(loggedInUserId, dto);
   }
 
-  @Patch()
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @Patch('profile')
   @ApiOperation({ summary: 'Edit user profile' })
+  @HttpCode(200)
+  @ResponseMessage(USER_MESSAGES.PROFILE_UPDATED)
   editProfile(
     @CurrentUser('userId') userId: string,
     @Body() dto: EditProfileDto,
@@ -57,10 +59,9 @@ export class UserController {
   }
 
   @Get('connections')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
   @ApiOperation({ summary: 'Get followers / following list (paginated)' })
   @HttpCode(200)
+  @ResponseMessage(USER_MESSAGES.CONNECTIONS_FETCHED)
   getConnections(
     @CurrentUser('userId') userId: string,
     @Query() dto: GetConnectionsDto,
