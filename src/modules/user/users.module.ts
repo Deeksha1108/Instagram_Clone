@@ -6,9 +6,14 @@ import { UserService } from './users.service';
 import { AuthModule } from '../auth/auth.module';
 import { PostModule } from '../post/post.module';
 import { Follow } from '../follow/entities/follow.entity';
+import { UserSession } from './entities/user_sessions.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Follow]), PostModule, AuthModule],
+  imports: [
+    TypeOrmModule.forFeature([User, Follow, UserSession]),
+    PostModule,
+    AuthModule,
+  ],
   controllers: [UserController],
   providers: [UserService],
 })
