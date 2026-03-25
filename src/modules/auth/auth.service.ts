@@ -23,7 +23,6 @@ import {
 } from 'src/common/constants/constants';
 import { JWT_CONFIG } from 'src/config/jwt.config';
 import {
-  ApiResponse,
   CreateProfileResponse,
   LoginResponse,
   RefreshTokenPayload,
@@ -74,7 +73,7 @@ export class AuthService {
    * Sends an OTP for signup or forgot-password; validates user existence, applies rate limiting,
    * hashes & stores the OTP in Redis, and returns a short-lived temp token.
    */
-  async sendOtp(dto: SendOtpDto): Promise<ApiResponse<SendOtpResponse>> {
+  async sendOtp(dto: SendOtpDto): Promise<SendOtpResponse> {
     const identifier = this.getIdentifier(dto);
     const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${dto.type}`;
 
@@ -111,28 +110,7 @@ export class AuthService {
       throw new NotFoundException(AUTH_MESSAGES.USER_NOT_FOUND);
     }
 
-    const bypassAllowed = this.isOtpBypassAllowed();
-
-    const otp = bypassAllowed
-      ? COMMON_CONFIG.otp.bypassCode
-      : this.generateRandomOtp();
-
-    const hashedOtp = await bcrypt.hash(otp, 6);
-
-    await this.redisService.set(
-      redisKey,
-      {
-        otp: hashedOtp,
-        verified: false,
-        type: dto.type,
-        verifyAttempts: 0,
-      },
-      AUTH_CONSTANTS.OTP_TTL_SECONDS,
-    );
-
-    if (dto.email && !bypassAllowed) {
-      this.mailerService.sendOtpEmail(dto.email, otp).catch(() => {});
-    }
+    await this.generateAndStoreOtp(identifier, dto.type, dto.email, dto.phone);
 
     const token = this.jwtService.sign(
       {
@@ -143,12 +121,7 @@ export class AuthService {
       { expiresIn: AUTH_CONSTANTS.TEMP_TOKEN_EXPIRES_IN },
     );
 
-    return {
-      message: AUTH_MESSAGES.OTP_SENT,
-      data: {
-        tempToken: token,
-      },
-    };
+    return { tempToken: token };
   }
 
   /**
@@ -158,7 +131,7 @@ export class AuthService {
   async verifyOtp(
     dto: VerifyOtpDto,
     tempTokenData: TempTokenData,
-  ): Promise<ApiResponse<VerifyOtpResponse>> {
+  ): Promise<VerifyOtpResponse> {
     const identifier = this.getIdentifier({
       email: tempTokenData.email,
       phone: tempTokenData.phoneNumber,
@@ -213,10 +186,7 @@ export class AuthService {
     );
     this.logger.log(`OTP verified successfully for ${identifier}`);
     return {
-      message: AUTH_MESSAGES.OTP_VERIFIED,
-      data: {
-        verified: true,
-      },
+      verified: true,
     };
   }
 
@@ -227,7 +197,7 @@ export class AuthService {
     dto: CreateProfileDto,
     tempTokenData: TempTokenData,
     device: string,
-  ): Promise<ApiResponse<CreateProfileResponse>> {
+  ): Promise<CreateProfileResponse> {
     const identifier = this.getIdentifier({
       email: tempTokenData.email,
       phone: tempTokenData.phoneNumber,
@@ -284,19 +254,12 @@ export class AuthService {
       device,
     );
     this.logger.log(`User profile created: ${user.id}`);
-    return {
-      message: AUTH_MESSAGES.PROFILE_CREATED,
-      data: session,
-    };
+    return session;
   }
-
   /**
    * Authenticates a user with email/phone/username + password and returns auth tokens.
    */
-  async login(
-    dto: LoginDto,
-    device: string,
-  ): Promise<ApiResponse<LoginResponse>> {
+  async login(dto: LoginDto,device: string): Promise<LoginResponse> {
     let query;
     if (dto.email) {
       query = { email: dto.email, isVerified: true };
@@ -345,10 +308,7 @@ export class AuthService {
 
     this.logger.log(`User logged in: ${user.id}`);
 
-    return {
-      message: AUTH_MESSAGES.LOGIN_SUCCESS,
-      data: session,
-    };
+    return session;
   }
 
   /**
@@ -358,7 +318,7 @@ export class AuthService {
   async facebookLogin(
     dto: FacebookLoginDto,
     device: string,
-  ): Promise<ApiResponse<LoginResponse>> {
+  ): Promise<LoginResponse> {
     let response: Response;
 
     try {
@@ -413,10 +373,7 @@ export class AuthService {
       device,
     );
     this.logger.log(`Facebook login successful for user: ${user.id}`);
-    return {
-      message: AUTH_MESSAGES.LOGIN_SUCCESS,
-      data: session,
-    };
+    return session;
   }
 
   /**
@@ -425,7 +382,7 @@ export class AuthService {
    */
   async refreshToken(
     payload: RefreshTokenPayload,
-  ): Promise<ApiResponse<RefreshTokenResponse>> {
+  ): Promise<RefreshTokenResponse> {
     const session = await this.userSessionRepo.findOne({
       where: {
         sessionId: payload.sessionId,
@@ -460,11 +417,8 @@ export class AuthService {
     this.logger.log(`Refresh token rotated for user: ${session.userId}`);
 
     return {
-      message: AUTH_MESSAGES.REFRESH_TOKEN_SUCCESS,
-      data: {
-        accessToken,
-        refreshToken,
-      },
+      accessToken,
+      refreshToken,
     };
   }
 
@@ -475,7 +429,7 @@ export class AuthService {
   async resetPassword(
     dto: ResetPasswordDto,
     tempTokenData: TempTokenData,
-  ): Promise<ApiResponse<null>> {
+  ): Promise<void> {
     const identifier = this.getIdentifier({
       email: tempTokenData.email,
       phone: tempTokenData.phoneNumber,
@@ -518,27 +472,22 @@ export class AuthService {
       this.redisService.del(redisKey),
     ]);
     this.logger.log(`Password reset successful for user: ${user.id}`);
-    return {
-      message: AUTH_MESSAGES.PASSWORD_RESET_SUCCESS,
-      data: null,
-    };
+    return;
   }
 
   /**
    * Resends OTP if the previous session is still valid; rate-limited and
    * respects the OTP bypass setting in dev/qa environments.
    */
-  async resendOtp(
-    tempTokenData: TempTokenData,
-  ): Promise<ApiResponse<SendOtpResponse>> {
+  async resendOtp(tempTokenData: TempTokenData): Promise<SendOtpResponse> {
     const identifier = this.getIdentifier({
       email: tempTokenData.email,
       phone: tempTokenData.phoneNumber,
     });
-    // Rate limit protection
-    await this.checkOtpRateLimit(identifier);
-    const key = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}`;
-    const session = await this.redisService.get(key);
+    const type = tempTokenData.type as OtpType;
+    const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${type}`;
+    await this.checkOtpRateLimit(redisKey);
+    const session = await this.redisService.get(redisKey);
 
     if (!session) {
       this.logger.warn(`Resend OTP failed: session expired for ${identifier}`);
@@ -552,74 +501,35 @@ export class AuthService {
       throw new BadRequestException(AUTH_MESSAGES.OTP_ALREADY_VERIFIED);
     }
 
-    if (session.type !== tempTokenData.type) {
+    if (session.type !== type) {
       this.logger.warn(`Resend OTP type mismatch for ${identifier}`);
       throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP_TYPE);
     }
 
-    /**
-     * Allow OTP bypass only in development or QA environment
-     */
-    const bypassAllowed = this.isOtpBypassAllowed();
-
-    let otp: string;
-
-    if (bypassAllowed) {
-      otp = COMMON_CONFIG.otp.bypassCode;
-      this.logger.warn(`OTP bypass active during resend for ${identifier}`);
-    } else {
-      otp = this.generateRandomOtp();
-
-      if (tempTokenData.email) {
-        await this.mailerService.sendOtpEmail(tempTokenData.email, otp);
-      }
-
-      if (tempTokenData.phoneNumber) {
-        // Future SMS integration
-      }
-    }
-
-    const hashedOtp = await bcrypt.hash(otp, 10);
-
-    /**
-     * Update OTP session in Redis and reset verify attempts
-     */
-    await this.redisService.set(
-      key,
-      {
-        ...session,
-        otp: hashedOtp,
-        verifyAttempts: 0,
-      },
-      AUTH_CONSTANTS.OTP_TTL_SECONDS,
+    await this.generateAndStoreOtp(
+      identifier,
+      type,
+      tempTokenData.email,
+      tempTokenData.phoneNumber,
     );
-
-    /**
-     * Generate new temporary token
-     */
     const token = this.jwtService.sign(
       {
         email: tempTokenData.email,
         phoneNumber: tempTokenData.phoneNumber,
-        type: tempTokenData.type,
+        type,
       },
       { expiresIn: AUTH_CONSTANTS.TEMP_TOKEN_EXPIRES_IN },
     );
 
     this.logger.log(`OTP resent successfully for ${identifier}`);
 
-    return {
-      message: AUTH_MESSAGES.OTP_SENT,
-      data: {
-        tempToken: token,
-      },
-    };
+    return { tempToken: token };
   }
 
   /**
    * Deactivates the given session in DB and removes its refresh token from Redis.
    */
-  async logout(sessionId: string): Promise<ApiResponse<null>> {
+  async logout(sessionId: string): Promise<void> {
     const session = await this.userSessionRepo.findOne({
       where: { sessionId, isActive: true },
       select: ['id', 'sessionId'],
@@ -634,26 +544,20 @@ export class AuthService {
 
     this.logger.log(`Session logged out: ${sessionId}`);
 
-    return {
-      message: AUTH_MESSAGES.LOGOUT_SUCCESS,
-      data: null,
-    };
+    return;
   }
 
   /**
    * Deactivates all active sessions for a user and clears their refresh tokens from Redis.
    */
-  async logoutAll(userId: string): Promise<ApiResponse<null>> {
+  async logoutAll(userId: string): Promise<void> {
     const sessions = await this.userSessionRepo.find({
       where: { userId, isActive: true },
       select: ['sessionId'],
     });
 
     if (!sessions.length) {
-      return {
-        message: AUTH_MESSAGES.LOGOUT_SUCCESS,
-        data: null,
-      };
+      return;
     }
 
     const sessionIds = sessions.map((s) => s.sessionId);
@@ -667,7 +571,7 @@ export class AuthService {
     ]);
     this.logger.log(`All sessions logged out for user: ${userId}`);
 
-    return { message: AUTH_MESSAGES.LOGOUT_SUCCESS, data: null };
+    return;
   }
 
   // Helper functions
@@ -797,5 +701,41 @@ export class AuthService {
       age--;
     }
     return age;
+  }
+
+  private async generateAndStoreOtp(
+    identifier: string,
+    type: OtpType,
+    email?: string,
+    phone?: string,
+  ) {
+    const bypassAllowed = this.isOtpBypassAllowed();
+
+    const otp = bypassAllowed
+      ? COMMON_CONFIG.otp.bypassCode
+      : this.generateRandomOtp();
+
+    const hashedOtp = await bcrypt.hash(otp, 6);
+
+    const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${type}`;
+
+    await this.redisService.set(
+      redisKey,
+      {
+        otp: hashedOtp,
+        verified: false,
+        type,
+        verifyAttempts: 0,
+      },
+      AUTH_CONSTANTS.OTP_TTL_SECONDS,
+    );
+
+    if (email && !bypassAllowed) {
+      this.mailerService.sendOtpEmail(email, otp).catch(() => {});
+    }
+
+    if (phone && !bypassAllowed) {
+      // integrate SMS provider here
+    }
   }
 }

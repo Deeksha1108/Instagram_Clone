@@ -36,38 +36,31 @@ export class UserService {
 
     const user = await this.getBasicUser(targetUserId);
 
-    return {
-      message: USER_MESSAGES.PROFILE_FETCHED,
-      data: user,
-    };
+    return user;
   }
 
   /**
-   * Fetch posts (self + other user)
-   * - if userId passed → fetch that user's posts
-   * - else → logged-in user posts
+   * Fetch posts (self + other user) with privacy handling
    */
   async getUserPosts(loggedInUserId: string, dto: GetPostsDto) {
     const { type, cursor, userId } = dto;
     const targetUserId = userId || loggedInUserId;
     const isSelf = targetUserId === loggedInUserId;
 
-    switch (type) {
-      case PostType.OWN:
-        return this.getOwnPosts(targetUserId, cursor);
-
-      case PostType.SAVED:
-        if (!isSelf) {
-          throw new ForbiddenException(USER_MESSAGES.SAVED_POSTS_FORBIDDEN);
-        }
-        return this.getSavedPosts(targetUserId, cursor);
-
-      case PostType.TAGGED:
-        return this.getTaggedPosts(targetUserId, cursor);
-
-      default:
-        throw new BadRequestException(USER_MESSAGES.INVALID_POST_TYPE);
+    const user = await this.userRepo.findOne({
+      where: { id: targetUserId },
+      select: ['id', 'isPrivate'],
+    });
+    if (!user) {
+      throw new NotFoundException(USER_MESSAGES.USER_NOT_FOUND);
     }
+    const canViewPosts = isSelf || !user.isPrivate;
+
+    const postsResponse = canViewPosts
+      ? await this.fetchPostsByType(type, targetUserId, isSelf, cursor)
+      : { posts: [], nextCursor: null, hasMore: false };
+
+    return postsResponse;
   }
 
   /**
@@ -90,17 +83,14 @@ export class UserService {
     await this.userRepo.save(user);
 
     return {
-      message: USER_MESSAGES.PROFILE_UPDATED,
-      data: {
-        bio: user.bio,
-        gender: user.gender,
-        showSuggestions: user.showSuggestions,
-      },
+      bio: user.bio,
+      gender: user.gender,
+      showSuggestions: user.showSuggestions,
     };
   }
 
   /**
-   * Entry point for followers/following
+   * Followers / Following
    */
   async getConnections(userId: string, dto: GetConnectionsDto) {
     const { type, cursor } = dto;
@@ -140,6 +130,33 @@ export class UserService {
       throw new NotFoundException(USER_MESSAGES.USER_NOT_FOUND);
     }
     return user;
+  }
+
+  /**
+   * Helper: Fetch posts by type (OWN, SAVED, TAGGED)
+   */
+  private async fetchPostsByType(
+    type: PostType,
+    userId: string,
+    isSelf: boolean,
+    cursor?: string,
+  ) {
+    switch (type) {
+      case PostType.OWN:
+        return this.getOwnPosts(userId, cursor);
+
+      case PostType.SAVED:
+        if (!isSelf) {
+          throw new ForbiddenException(USER_MESSAGES.SAVED_POSTS_FORBIDDEN);
+        }
+        return this.getSavedPosts(userId, cursor);
+
+      case PostType.TAGGED:
+        return this.getTaggedPosts(userId, cursor);
+
+      default:
+        throw new BadRequestException(USER_MESSAGES.INVALID_POST_TYPE);
+    }
   }
 
   /**
@@ -191,17 +208,16 @@ export class UserService {
     if (cursor) {
       const [createdAt, id] = cursor.split('_');
 
-      if (!createdAt || !id) {
+      const date = new Date(createdAt);
+
+      if (!createdAt || !id || isNaN(date.getTime())) {
         throw new BadRequestException(USER_MESSAGES.INVALID_CURSOR);
       }
 
       qb = qb.andWhere(
         `(post.createdAt < :createdAt OR 
-        (post.createdAt = :createdAt AND post.id < :id))`,
-        {
-          createdAt: new Date(createdAt),
-          id,
-        },
+     (post.createdAt = :createdAt AND post.id < :id))`,
+        { createdAt: date, id },
       );
     }
 
@@ -214,12 +230,9 @@ export class UserService {
     const result = buildPaginatedResponse(posts, limit);
 
     return {
-      message: USER_MESSAGES.POSTS_FETCHED,
-      data: {
-        posts: result.items,
-        nextCursor: result.nextCursor,
-        hasMore: result.hasMore,
-      },
+      posts: result.items,
+      nextCursor: result.nextCursor,
+      hasMore: result.hasMore,
     };
   }
 
@@ -270,16 +283,15 @@ export class UserService {
     if (cursor) {
       const [createdAt, id] = cursor.split('_');
 
-      if (!createdAt || !id) {
+      const date = new Date(createdAt);
+
+      if (!createdAt || !id || isNaN(date.getTime())) {
         throw new BadRequestException(USER_MESSAGES.INVALID_CURSOR);
       }
       qb = qb.andWhere(
         `(user.createdAt < :createdAt OR 
-      (user.createdAt = :createdAt AND user.id < :id))`,
-        {
-          createdAt: new Date(createdAt),
-          id,
-        },
+   (user.createdAt = :createdAt AND user.id < :id))`,
+        { createdAt: date, id },
       );
     }
 
@@ -298,12 +310,9 @@ export class UserService {
     const result = buildPaginatedResponse(users, limit);
 
     return {
-      message: USER_MESSAGES.CONNECTIONS_FETCHED,
-      data: {
-        users: result.items,
-        nextCursor: result.nextCursor,
-        hasMore: result.hasMore,
-      },
+      users: result.items,
+      nextCursor: result.nextCursor,
+      hasMore: result.hasMore,
     };
   }
 }
