@@ -1,14 +1,15 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from './entities/user.entity';
-import { LessThan, Repository, SelectQueryBuilder } from 'typeorm';
+import { Repository, SelectQueryBuilder } from 'typeorm';
 import { USER_MESSAGES } from './response/user.response';
 import { Post } from '../post/entities/post.entity';
-import { GetMyPostsDto } from './dto/myPosts.dto';
+import { GetPostsDto } from './dto/posts.dto';
 import { EditProfileDto } from './dto/editProfile.dto';
 import { GetConnectionsDto } from './dto/getConnections.dto';
 import { PAGINATION } from 'src/common/constants/constants';
@@ -26,28 +27,14 @@ export class UserService {
   ) {}
 
   /**
-   * Fetch logged-in user's profile (lightweight query)
-   * Only required fields are selected to reduce DB load
+   * Fetch profile (self + other user)
+   * - if userId passed → fetch that user
+   * - else → fetch logged-in user
    */
-  async getMyProfile(userId: string) {
-    const user = await this.userRepo.findOne({
-      where: { id: userId },
-      select: [
-        'id',
-        'username',
-        'fullName',
-        'bio',
-        'profilePicture',
-        'postsCount',
-        'followersCount',
-        'followingCount',
-        'isPrivate',
-      ],
-    });
+  async getProfile(loggedInUserId: string, userId?: string) {
+    const targetUserId = userId || loggedInUserId;
 
-    if (!user) {
-      throw new NotFoundException(USER_MESSAGES.USER_NOT_FOUND);
-    }
+    const user = await this.getBasicUser(targetUserId);
 
     return {
       message: USER_MESSAGES.PROFILE_FETCHED,
@@ -56,21 +43,27 @@ export class UserService {
   }
 
   /**
-   * Entry point for fetching posts based on type
-   * Delegates to specific handlers to keep logic modular
+   * Fetch posts (self + other user)
+   * - if userId passed → fetch that user's posts
+   * - else → logged-in user posts
    */
-  async getMyPosts(userId: string, dto: GetMyPostsDto) {
-    const { type, cursor } = dto;
+  async getUserPosts(loggedInUserId: string, dto: GetPostsDto) {
+    const { type, cursor, userId } = dto;
+    const targetUserId = userId || loggedInUserId;
+    const isSelf = targetUserId === loggedInUserId;
 
     switch (type) {
       case PostType.OWN:
-        return this.getOwnPosts(userId, cursor);
+        return this.getOwnPosts(targetUserId, cursor);
 
       case PostType.SAVED:
-        return this.getSavedPosts(userId, cursor);
+        if (!isSelf) {
+          throw new ForbiddenException(USER_MESSAGES.SAVED_POSTS_FORBIDDEN);
+        }
+        return this.getSavedPosts(targetUserId, cursor);
 
       case PostType.TAGGED:
-        return this.getTaggedPosts(userId, cursor);
+        return this.getTaggedPosts(targetUserId, cursor);
 
       default:
         throw new BadRequestException(USER_MESSAGES.INVALID_POST_TYPE);
@@ -122,6 +115,31 @@ export class UserService {
       default:
         throw new BadRequestException(USER_MESSAGES.INVALID_CONNECTION_TYPE);
     }
+  }
+
+  /**
+   * Reusable helper for fetching minimal user data
+   * Keeps query lightweight
+   */
+  private async getBasicUser(userId: string) {
+    const user = await this.userRepo.findOne({
+      where: { id: userId },
+      select: [
+        'id',
+        'username',
+        'fullName',
+        'bio',
+        'profilePicture',
+        'postsCount',
+        'followersCount',
+        'followingCount',
+        'isPrivate',
+      ],
+    });
+    if (!user) {
+      throw new NotFoundException(USER_MESSAGES.USER_NOT_FOUND);
+    }
+    return user;
   }
 
   /**
