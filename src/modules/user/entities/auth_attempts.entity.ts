@@ -1,6 +1,6 @@
 import { Column, Entity, Index } from 'typeorm';
 import { BaseEntity } from 'src/common/entities/base.entity';
-import { AttemptStatus, AttemptType } from 'src/common/enum/auth-attempt.enum';
+import { AttemptStatus, AttemptType } from 'src/common/enum/enum.common';
 
 @Entity('auth_attempts')
 export class AuthAttempt extends BaseEntity {

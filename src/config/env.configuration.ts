@@ -18,12 +18,4 @@ export const envConfiguration = () => ({
     host: process.env.REDIS_HOST || '',
     port: parseInt(process.env.REDIS_PORT || '', 10),
   },
-
-  jwt: {
-    secret: process.env.JWT_SECRET,
-    refreshSecret: process.env.JWT_REFRESH_SECRET,
-
-    expiresIn: parseInt(process.env.JWT_EXPIRES_IN || '', 10),
-    refreshExpiresIn: parseInt(process.env.JWT_REFRESH_EXPIRES_IN || '', 10),
-  },
 });

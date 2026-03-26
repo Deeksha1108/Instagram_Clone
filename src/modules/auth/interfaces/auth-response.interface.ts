@@ -1,8 +1,3 @@
-export interface ApiResponse<T> {
-  message: string;
-  data?: T;
-}
-
 export interface SendOtpResponse {
   tempToken: string;
 }
@@ -25,4 +20,10 @@ export interface LoginResponse {
 export interface RefreshTokenResponse {
   accessToken: string;
   refreshToken: string;
+}
+
+export interface RefreshTokenPayload {
+  userId: string;
+  username: string;
+  sessionId: string;
 }

@@ -6,8 +6,8 @@ import {
   IsPhoneNumber,
   Validate,
 } from 'class-validator';
+import { OtpType } from 'src/common/enum/enum.common';
 import { EmailOrPhoneConstraint } from 'src/common/validators/email-or-phone.validator';
-import { OtpType } from 'src/common/enum/otp-type.enum';
 
 export class SendOtpDto {
   @ApiProperty({ example: 'test@gmail.com', required: false })

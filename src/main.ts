@@ -20,11 +20,6 @@ async function bootstrap() {
 
   app.useGlobalFilters(new AllExceptionsFilter());
 
-  app.useGlobalInterceptors(
-    new RequestInterceptor(),
-    new ResponseInterceptor(),
-  );
-
   const config = new DocumentBuilder()
     .setTitle('Instagram Clone API')
     .setDescription('API documentation for Instagram Clone')

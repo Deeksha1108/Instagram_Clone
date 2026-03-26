@@ -21,7 +21,14 @@ import type { RequestWithTempToken } from 'src/common/types/auth.types';
 import { BasicAuthGuard } from 'src/common/guards/basic-auth.guard';
 import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { CurrentUser } from 'src/common/decorators/current-user.decorator';
+import { FacebookLoginDto } from './dto/facebook-login.dto';
+import { DeviceHeader } from 'src/common/decorators/device.decorator';
+import { JwtRefreshGuard } from 'src/common/guards/jwt-refresh.guard';
+import type { RefreshTokenPayload } from './interfaces/auth-response.interface';
+import { AUTH_MESSAGES } from './response/auth.response';
+import { ResponseMessage } from 'src/common/decorators/response.decorator';
 
 @ApiTags('Auth Module')
 @Controller('auth')
@@ -33,6 +40,7 @@ export class AuthController {
   @ApiBasicAuth('BasicAuth')
   @ApiOperation({ summary: 'Send OTP using email or phone' })
   @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.OTP_SENT)
   sendOtp(@Body() dto: SendOtpDto) {
     return this.authService.sendOtp(dto);
   }
@@ -44,6 +52,7 @@ export class AuthController {
     summary: 'Verify OTP — pass token from sendOtp in Authorization header',
   })
   @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.OTP_VERIFIED)
   verifyOtp(@Body() dto: VerifyOtpDto, @Req() req: RequestWithTempToken) {
     return this.authService.verifyOtp(dto, req.tempTokenData);
   }
@@ -53,11 +62,13 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create user profile after OTP verification' })
   @HttpCode(201)
+  @ResponseMessage(AUTH_MESSAGES.PROFILE_CREATED)
   createProfile(
     @Body() dto: CreateProfileDto,
     @Req() req: RequestWithTempToken,
+    @DeviceHeader() device: string,
   ) {
-    return this.authService.createProfile(dto, req.tempTokenData);
+    return this.authService.createProfile(dto, req.tempTokenData, device);
   }
 
   @Post('login')
@@ -65,8 +76,19 @@ export class AuthController {
   @ApiBasicAuth('BasicAuth')
   @ApiOperation({ summary: 'Login with email/phone/username and password' })
   @HttpCode(200)
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  @ResponseMessage(AUTH_MESSAGES.LOGIN_SUCCESS)
+  login(@Body() dto: LoginDto, @DeviceHeader() device: string) {
+    return this.authService.login(dto, device);
+  }
+
+  @Post('facebook-login')
+  @UseGuards(BasicAuthGuard)
+  @ApiBasicAuth('BasicAuth')
+  @ApiOperation({ summary: 'Login or signup via Facebook' })
+  @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.LOGIN_SUCCESS)
+  loginWithFacebook(@Body() dto: FacebookLoginDto, @DeviceHeader() device: string) {
+    return this.authService.facebookLogin(dto, device);
   }
 
   @Post('reset-password')
@@ -74,6 +96,7 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Reset password using phone or email' })
   @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.PASSWORD_RESET_SUCCESS)
   resetPassword(
     @Body() dto: ResetPasswordDto,
     @Req() req: RequestWithTempToken,
@@ -86,16 +109,38 @@ export class AuthController {
   @ApiBearerAuth()
   @ApiOperation({summary: 'Resend OTP using temp token after initial sendOtp'})
   @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.OTP_SENT)
   resendOtp(@Req() req: RequestWithTempToken) {
     return this.authService.resendOtp(req.tempTokenData);
   }
 
   @Post('refresh-token')
-  @UseGuards(BasicAuthGuard)
-  @ApiBasicAuth('BasicAuth')
-  @ApiOperation({ summary: 'Refresh access token using refresh token' })
+  @UseGuards(JwtRefreshGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Refresh access token' })
   @HttpCode(200)
-  refreshToken(@Body() dto: RefreshTokenDto) {
-    return this.authService.refreshToken(dto);
+  @ResponseMessage(AUTH_MESSAGES.REFRESH_TOKEN_SUCCESS)
+  refreshToken(@CurrentUser() user: RefreshTokenPayload) {
+    return this.authService.refreshToken(user);
+  }
+
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Logout current device' })
+  @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.LOGOUT_SUCCESS)
+  logout(@CurrentUser('sessionId') sessionId: string) {
+    return this.authService.logout(sessionId);
+  }
+
+  @Post('logout-all')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Logout user from all devices' })
+  @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.LOGOUT_SUCCESS)
+  logoutAll(@CurrentUser('userId') userId: string) {
+    return this.authService.logoutAll(userId);
   }
 }

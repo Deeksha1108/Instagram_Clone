@@ -26,3 +26,7 @@ export const NODE_ENV_TYPE = {
   UAT: 'uat',
   PROD: 'production',
 };
+
+export const OTP_CONFIG = {
+  LENGTH: 6,
+};
