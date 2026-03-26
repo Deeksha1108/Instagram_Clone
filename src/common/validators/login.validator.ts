@@ -6,18 +6,15 @@ import {
 
 @ValidatorConstraint({ name: 'loginIdentifier', async: false })
 export class LoginIdentifierConstraint implements ValidatorConstraintInterface {
-
   validate(value: any, args: ValidationArguments) {
     const obj = args.object as any;
 
-    return (
-      (!!obj.email && !obj.phone && !obj.username) ||
-      (!obj.email && !!obj.phone && !obj.username) ||
-      (!obj.email && !obj.phone && !!obj.username)
-    );
+    if (!obj.email && !obj.username) return false;
+    if (obj.email && obj.username) return false;
+    return true;
   }
 
   defaultMessage(args: ValidationArguments) {
-    return 'Provide exactly one of email, phone, or username';
+    return 'Either email or username is required';
   }
 }

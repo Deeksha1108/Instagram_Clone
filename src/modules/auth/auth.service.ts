@@ -257,17 +257,11 @@ export class AuthService {
     return session;
   }
   /**
-   * Authenticates a user with email/phone/username + password and returns auth tokens.
+   * Authenticates a user with email/username + password and returns auth tokens.
    */
   async login(dto: LoginDto,device: string): Promise<LoginResponse> {
-    let query;
-    if (dto.email) {
-      query = { email: dto.email, isVerified: true };
-    } else if (dto.phone) {
-      query = { phone: dto.phone, isVerified: true };
-    } else {
-      query = { username: dto.username, isVerified: true };
-    }
+    const identifier = dto.email || dto.username;
+    const query = dto.email ? { email: dto.email, isVerified: true } : { username: dto.username, isVerified: true };
     const user = await this.userRepo.findOne({
       where: query,
       select: ['id', 'password', 'username'],
@@ -276,12 +270,12 @@ export class AuthService {
     if (!user) {
       this.authAttemptRepo
         .save({
-          email: dto.email,
-          phone: dto.phone,
+          identifier,
           attemptType: AttemptType.LOGIN,
           status: AttemptStatus.INVALID_USER,
         })
         .catch(() => {});
+      this.logger.warn(`Invalid login attempt (user not found): ${identifier}`);
 
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
@@ -291,12 +285,12 @@ export class AuthService {
     if (!passwordMatch) {
       this.authAttemptRepo
         .save({
-          email: dto.email,
-          phone: dto.phone,
+          identifier,
           attemptType: AttemptType.LOGIN,
           status: AttemptStatus.WRONG_PASSWORD,
         })
         .catch(() => {});
+      this.logger.warn(`Invalid login attempt (wrong password): ${identifier}`);
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 
@@ -306,7 +300,7 @@ export class AuthService {
       device,
     );
 
-    this.logger.log(`User logged in: ${user.id}`);
+    this.logger.log(`User logged in successfully: ${user.id}`);
 
     return session;
   }

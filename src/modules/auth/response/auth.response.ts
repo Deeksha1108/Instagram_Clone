@@ -9,7 +9,7 @@ export const AUTH_MESSAGES = {
   OTP_VERIFIED: 'OTP verified successfully',
   LOGIN_SUCCESS: 'Login successful',
   LOGOUT_SUCCESS: 'Logout successful',
-  INVALID_CREDENTIALS: 'Invalid credentials',
+  INVALID_CREDENTIALS: 'Invalid email/username or password.',
   INVALID_IDENTIFIER: 'Invalid identifier',
   SESSION_EXPIRED: 'Session expired. Please login again',
   USER_ALREADY_EXISTS: 'User already exists',

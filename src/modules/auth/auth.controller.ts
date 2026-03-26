@@ -74,7 +74,7 @@ export class AuthController {
   @Post('login')
   @UseGuards(BasicAuthGuard)
   @ApiBasicAuth('BasicAuth')
-  @ApiOperation({ summary: 'Login with email/phone/username and password' })
+  @ApiOperation({ summary: 'Login with email/username and password' })
   @HttpCode(200)
   @ResponseMessage(AUTH_MESSAGES.LOGIN_SUCCESS)
   login(@Body() dto: LoginDto, @DeviceHeader() device: string) {
