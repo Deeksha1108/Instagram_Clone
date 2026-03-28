@@ -1,21 +1,49 @@
 export const envConfiguration = () => ({
-  nodeEnv: process.env.NODE_ENV || '',
+  nodeEnv: process.env.NODE_ENV,
 
-  otp: {
-    bypassEnabled: process.env.BYPASS_OTP_ENABLED === 'true',
-    bypassCode: process.env.BYPASS_OTP || '',
-
-    rateLimitMax: parseInt(process.env.OTP_RATE_LIMIT_MAX ?? '5', 10),
-    rateLimitWindow: parseInt(
-      process.env.OTP_RATE_LIMIT_WINDOW_SECONDS || '',
-      10,
-    ),
-
-    maxVerifyAttempts: parseInt(process.env.OTP_MAX_VERIFY_ATTEMPTS || '', 10),
+  Jwt: {
+    secret: process.env.JWT_SECRET,
+    refreshSecret: process.env.JWT_REFRESH_SECRET,
+    expiresIn: Number(process.env.JWT_EXPIRES_IN),
+    refreshExpiresIn: Number(process.env.JWT_REFRESH_EXPIRES_IN),
+    tempTokenExpiresIn: Number(process.env.TEMP_TOKEN_EXPIRES_IN),
   },
 
-  redis: {
-    host: process.env.REDIS_HOST || '',
-    port: parseInt(process.env.REDIS_PORT || '', 10),
+  Redis: {
+    host: process.env.REDIS_HOST,
+    port: Number(process.env.REDIS_PORT),
+  },
+
+  Otp: {
+    bypassEnabled: process.env.BYPASS_OTP_ENABLED === 'true',
+    bypassCode: process.env.BYPASS_OTP,
+
+    rateLimitMax: Number(process.env.OTP_RATE_LIMIT_MAX),
+    rateLimitWindow: Number(process.env.OTP_RATE_LIMIT_WINDOW_SECONDS),
+    maxVerifyAttempts: Number(process.env.OTP_MAX_VERIFY_ATTEMPTS),
+  },
+
+  Facebook: {
+    graphUrl: process.env.FACEBOOK_GRAPH_URL,
+    fields: process.env.FACEBOOK_FIELDS,
+  },
+
+  Google: {
+    clientId: process.env.GOOGLE_CLIENT_ID,
+  },
+
+  Apple: {
+    jwksUri: process.env.APPLE_JWKS_URI,
+    issuer: process.env.APPLE_ISSUER,
+    clientId: process.env.APPLE_CLIENT_ID,
+    algorithm: process.env.APPLE_JWT_ALGORITHM,
+  },
+
+  Smtp: {
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT),
+    secure: process.env.SMTP_SECURE === 'true',
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
   },
 });

@@ -11,6 +11,7 @@ import { Follow } from 'src/modules/follow/entities/follow.entity';
 @Index(['email', 'isVerified'])
 @Index(['phone', 'isVerified'])
 @Index(['username', 'isVerified'])
+@Index(['provider', 'providerId'], {unique: true, where: `"providerId" IS NOT NULL`})
 export class User extends BaseEntity {
   @Column({ nullable: true, unique: true })
   email: string;
@@ -24,7 +25,7 @@ export class User extends BaseEntity {
   @Column({ nullable: true })
   fullName: string;
 
-  @Column({ unique: true })
+  @Column({ unique: true, nullable: true })
   username: string;
 
   @Column({ nullable: true })
@@ -39,16 +40,16 @@ export class User extends BaseEntity {
   @Column({ nullable: true, select: false })
   password: string;
 
-  @Index()
-  @Column({ nullable: true })
-  facebookId: string;
-
   @Column({
     type: 'enum',
     enum: AUTH_PROVIDERS,
     default: AUTH_PROVIDERS.LOCAL,
   })
   provider: AUTH_PROVIDERS;
+
+  @Column({ nullable: true })
+  @Index()
+  providerId: string;
 
   @Column({ nullable: true, length: 150 })
   bio: string;

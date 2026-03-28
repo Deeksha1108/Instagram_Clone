@@ -4,20 +4,20 @@ const env = envConfiguration();
 
 export const COMMON_CONFIG = {
   nodeEnv: env.nodeEnv,
+  jwt: env.Jwt,
+  OTP: {
+    bypassEnabled: env.Otp.bypassEnabled,
+    bypassCode: env.Otp.bypassCode,
 
-  otp: {
-    bypassEnabled: env.otp.bypassEnabled,
-    bypassCode: env.otp.bypassCode,
-
-    rateLimitMax: env.otp.rateLimitMax,
-    rateLimitWindow: env.otp.rateLimitWindow,
-    maxVerifyAttempts: env.otp.maxVerifyAttempts,
+    rateLimitMax: env.Otp.rateLimitMax,
+    rateLimitWindow: env.Otp.rateLimitWindow,
+    maxVerifyAttempts: env.Otp.maxVerifyAttempts,
   },
 
-  redis: {
-    host: env.redis.host,
-    port: env.redis.port,
-  },
+  REDIS: env.Redis,
+  FACEBOOK: env.Facebook,
+  GOOGLE: env.Google,
+  APPLE: env.Apple,
 };
 
 export const NODE_ENV_TYPE = {
