@@ -5,13 +5,12 @@ export const AUTH_CONSTANTS = {
   UNKNOWN_DEVICE: 'unknown',
 } as const;
 
-export const AUTH_PROVIDERS = {
-  LOCAL: 'local',
-  FACEBOOK: 'facebook',
-} as const;
-
-export type AUTH_PROVIDERS =
-  (typeof AUTH_PROVIDERS)[keyof typeof AUTH_PROVIDERS];
+export enum AUTH_PROVIDERS {
+  LOCAL = 'local',
+  FACEBOOK = 'facebook',
+  GOOGLE = 'google',
+  APPLE = 'apple',
+}
 
 export const REDIS_KEYS = {
   REFRESH_TOKEN: 'refresh_token',

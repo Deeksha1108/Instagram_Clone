@@ -29,6 +29,9 @@ import { JwtRefreshGuard } from 'src/common/guards/jwt-refresh.guard';
 import type { RefreshTokenPayload } from './interfaces/auth-response.interface';
 import { AUTH_MESSAGES } from './response/auth.response';
 import { ResponseMessage } from 'src/common/decorators/response.decorator';
+import { GoogleLoginDto } from './dto/google.dto';
+import { AppleLoginDto } from './dto/apple.dto';
+import { SetUsernameDto } from './dto/setUsername.dto';
 
 @ApiTags('Auth Module')
 @Controller('auth')
@@ -71,10 +74,20 @@ export class AuthController {
     return this.authService.createProfile(dto, req.tempTokenData, device);
   }
 
+  @Post('set-username')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Set username after social login' })
+  @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.USERNAME_SET_SUCCESS)
+  setUsername(@Body() dto: SetUsernameDto, @CurrentUser() user) {
+    return this.authService.setUsername(user.userId, dto);
+  }
+
   @Post('login')
   @UseGuards(BasicAuthGuard)
   @ApiBasicAuth('BasicAuth')
-  @ApiOperation({ summary: 'Login with email/phone/username and password' })
+  @ApiOperation({ summary: 'Login with email/username and password' })
   @HttpCode(200)
   @ResponseMessage(AUTH_MESSAGES.LOGIN_SUCCESS)
   login(@Body() dto: LoginDto, @DeviceHeader() device: string) {
@@ -89,6 +102,26 @@ export class AuthController {
   @ResponseMessage(AUTH_MESSAGES.LOGIN_SUCCESS)
   loginWithFacebook(@Body() dto: FacebookLoginDto, @DeviceHeader() device: string) {
     return this.authService.facebookLogin(dto, device);
+  }
+
+  @Post('google-login')
+  @UseGuards(BasicAuthGuard)
+  @ApiBasicAuth('BasicAuth')
+  @ApiOperation({ summary: 'Login or signup via Google' })
+  @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.LOGIN_SUCCESS)
+  loginWithGoogle(@Body() dto: GoogleLoginDto, @DeviceHeader() device: string) {
+    return this.authService.googleLogin(dto, device);
+  }
+
+  @Post('apple-login')
+  @UseGuards(BasicAuthGuard)
+  @ApiBasicAuth('BasicAuth')
+  @ApiOperation({ summary: 'Login or signup via Apple' })
+  @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.LOGIN_SUCCESS)
+  loginWithApple(@Body() dto: AppleLoginDto, @DeviceHeader() device: string) {
+    return this.authService.appleLogin(dto, device);
   }
 
   @Post('reset-password')

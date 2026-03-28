@@ -11,7 +11,7 @@ export class UserSession extends BaseEntity {
   user: User;
 
   @Index()
-  @Column()
+  @Column({ name: 'user_id' })
   userId: string;
 
   @Index()

@@ -8,8 +8,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     this.client = new Redis({
-      host: COMMON_CONFIG.redis.host,
-      port: COMMON_CONFIG.redis.port,
+      host: COMMON_CONFIG.REDIS.host,
+      port: COMMON_CONFIG.REDIS.port,
     });
   }
 
