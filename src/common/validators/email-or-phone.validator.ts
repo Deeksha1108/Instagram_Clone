@@ -3,15 +3,40 @@ import {
   ValidatorConstraint,
   ValidatorConstraintInterface,
 } from 'class-validator';
+import { AUTH_MESSAGES } from 'src/modules/auth/response/auth.response';
 
-@ValidatorConstraint({ name: 'emailOrPhone', async: false })
-export class EmailOrPhoneConstraint implements ValidatorConstraintInterface {
-  validate(value: any, args: ValidationArguments) {
-    const obj = args.object as any;
-    return (!!obj.email && !obj.phone) || (!obj.email && !!obj.phone);
+@ValidatorConstraint({ name: 'SendOtpValidator', async: false })
+export class SendOtpValidator implements ValidatorConstraintInterface {
+  validate(_: any, args: any): boolean {
+    const { email, phone, countryCode } = args.object;
+
+    if ((email && phone) || (!email && !phone)) {
+      return false;
+    }
+
+    if (email) return true;
+
+    if (phone) {
+      if (!countryCode) return false;
+      if (!/^\+[1-9]\d{0,3}$/.test(countryCode)) return false;
+      const fullPhone = `${countryCode}${phone}`;
+      if (!/^\+[1-9]\d{1,14}$/.test(fullPhone)) return false;
+      return true;
+    }
+    return false;
   }
 
-  defaultMessage(args: ValidationArguments) {
-    return 'Provide exactly one of email or phone';
+  defaultMessage(args: any): string {
+    const { email, phone, countryCode } = args.object;
+    if ((email && phone) || (!email && !phone)) {
+      return AUTH_MESSAGES.PROVIDE_EMAIL_OR_PHONE;
+    }
+    if (phone && !countryCode) {
+      return AUTH_MESSAGES.COUNTRY_CODE_REQUIRED;
+    }
+    if (countryCode && !/^\+[1-9]\d{0,3}$/.test(countryCode)) {
+      return AUTH_MESSAGES.INVALID_COUNTRY_CODE;
+    }
+    return AUTH_MESSAGES.INVALID_PHONE_NUMBER;
   }
 }

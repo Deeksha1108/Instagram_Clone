@@ -36,6 +36,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MailerService } from 'src/shared/mailer/mailer.service';
 import { AuthAttempt } from '../user/entities/auth_attempts.entity';
 import {
+  BCRYPT_CONFIG,
   COMMON_CONFIG,
   NODE_ENV_TYPE,
   OTP_CONFIG,
@@ -54,6 +55,8 @@ import { AppleLoginDto } from './dto/apple.dto';
 import { SetUsernameDto } from './dto/setUsername.dto';
 import { OAuth2Client } from 'google-auth-library';
 import { verifyAppleToken } from 'src/common/utils/apple-jwt.util';
+import { CreatePasswordDto } from './dto/create-password.dto';
+import { CreateUsernameDto } from './dto/create-username.dto';
 
 @Injectable()
 export class AuthService {
@@ -81,7 +84,7 @@ export class AuthService {
    * hashes & stores the OTP in Redis, and returns a short-lived temp token.
    */
   async sendOtp(dto: SendOtpDto): Promise<SendOtpResponse> {
-    const identifier = this.getIdentifier(dto);
+    const identifier = this.getIdentifier({ email: dto.email, phone: dto.phone });
     const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${dto.type}`;
 
     await this.checkOtpRateLimit(redisKey);
@@ -186,15 +189,112 @@ export class AuthService {
     }
     session.verified = true;
 
+    // Extend TTL so the user has ample time to complete all remaining onboarding
+    // steps (create-password → create-username → create-profile) without the
+    // Redis session expiring mid-flow.
     await this.redisService.set(
       redisKey,
       session,
-      AUTH_CONSTANTS.OTP_TTL_SECONDS,
+      AUTH_CONSTANTS.ONBOARDING_SESSION_TTL_SECONDS,
     );
     this.logger.log(`OTP verified successfully for ${identifier}`);
     return {
       verified: true,
     };
+  }
+
+  async createPassword(
+    dto: CreatePasswordDto,
+    tempTokenData: TempTokenData,
+  ): Promise<void> {
+    const identifier = this.getIdentifier({
+      email: tempTokenData.email,
+      phone: tempTokenData.phoneNumber,
+    });
+
+    if (tempTokenData.type === OtpType.FORGOT_PASSWORD) {
+      throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP_TYPE);
+    }
+
+    const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${tempTokenData.type}`;
+
+    const session = await this.redisService.get(redisKey);
+
+    if (!session) {
+      throw new NotFoundException(AUTH_MESSAGES.OTP_SESSION_EXPIRED);
+    }
+
+    if (!session.verified) {
+      throw new UnauthorizedException(AUTH_MESSAGES.OTP_NOT_VERIFIED);
+    }
+
+    // prevent overwrite
+    if (session.password) {
+      throw new BadRequestException(AUTH_MESSAGES.PASSWORD_ALREADY_SET);
+    }
+
+    const hashedPassword = await bcrypt.hash(
+      dto.password,
+      BCRYPT_CONFIG.PASSWORD_SALT_ROUNDS,
+    );
+
+    session.password = hashedPassword;
+
+    await this.redisService.set(
+      redisKey,
+      session,
+      AUTH_CONSTANTS.ONBOARDING_SESSION_TTL_SECONDS,
+    );
+
+    this.logger.log(`Password created for ${identifier}`);
+  }
+
+  async createUsername(
+    dto: CreateUsernameDto,
+    tempTokenData: TempTokenData,
+  ): Promise<void> {
+    const identifier = this.getIdentifier({
+      email: tempTokenData.email,
+      phone: tempTokenData.phoneNumber,
+    });
+
+    const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${tempTokenData.type}`;
+
+    const session = await this.redisService.get(redisKey);
+
+    if (!session) {
+      throw new NotFoundException(AUTH_MESSAGES.OTP_SESSION_EXPIRED);
+    }
+
+    if (!session.verified) {
+      throw new UnauthorizedException(AUTH_MESSAGES.OTP_NOT_VERIFIED);
+    }
+
+    if (!session.password) {
+      throw new BadRequestException(AUTH_MESSAGES.PASSWORD_NOT_SET);
+    }
+
+    // Duplicate check (IMPORTANT)
+    const exists = await this.userRepo.exist({
+      where: { username: dto.username },
+    });
+
+    if (exists) {
+      throw new BadRequestException(AUTH_MESSAGES.USERNAME_TAKEN);
+    }
+
+    // prevent overwrite
+    if (session.username) {
+      throw new BadRequestException(AUTH_MESSAGES.USERNAME_ALREADY_SET);
+    }
+
+    session.username = dto.username;
+
+    await this.redisService.set(
+      redisKey,
+      session,
+      AUTH_CONSTANTS.ONBOARDING_SESSION_TTL_SECONDS,
+    );
   }
 
   /**
@@ -211,57 +311,58 @@ export class AuthService {
     });
     const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${tempTokenData.type}`;
 
-    const otpSession = await this.redisService.get(redisKey);
+    const session = await this.redisService.get(redisKey);
 
-    if (!otpSession) {
+    // guards
+    if (!session) {
       throw new NotFoundException(AUTH_MESSAGES.OTP_SESSION_EXPIRED);
     }
 
-    if (otpSession.type === OtpType.FORGOT_PASSWORD) {
+    if (tempTokenData.type === OtpType.FORGOT_PASSWORD) {
       throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP_TYPE);
     }
 
-    if (!otpSession.verified) {
+    if (!session.verified) {
       throw new UnauthorizedException(AUTH_MESSAGES.OTP_NOT_VERIFIED);
     }
 
-    const existingUser = await this.userRepo.exist({
-      where: { username: dto.username },
-    });
-    if (existingUser) {
-      this.logger.warn(`Username already taken: ${dto.username}`);
-      throw new BadRequestException(AUTH_MESSAGES.USERNAME_TAKEN);
+    if (!session.password) {
+      throw new BadRequestException(AUTH_MESSAGES.PASSWORD_NOT_SET);
     }
-    const hashedPassword = await bcrypt.hash(dto.password, 8);
 
-    const dob = new Date(dto.dateOfBirth);
-    const age = this.calculateAge(dob);
-
-    if (age < 18) {
-      throw new BadRequestException(AUTH_MESSAGES.USER_UNDERAGE);
+    if (!session.username) {
+      throw new BadRequestException(AUTH_MESSAGES.USERNAME_NOT_SET);
     }
+
+    // final DB write (atomic)
     const user = this.userRepo.create({
       ...(tempTokenData.email && { email: tempTokenData.email }),
       ...(tempTokenData.phoneNumber && { phone: tempTokenData.phoneNumber }),
       fullName: dto.fullName,
-      username: dto.username,
-      age: age,
-      dateOfBirth: dob,
-      gender: dto.gender,
-      password: hashedPassword,
+      bio: dto.bio,
+      website: dto.website,
+      pronouns: dto.pronouns,
+      profilePicture: dto.profilePicture,
+      username: session.username,
+      password: session.password,
       isVerified: true,
+      accountType: dto.accountType,
+      interests: dto.interests ?? [],
     });
 
     await this.userRepo.save(user);
+
+    // cleanup
     await this.redisService.del(redisKey);
 
-    const session = await this.createUserSessionAndTokens(
+    // session tokens
+    const authSession = await this.createUserSessionAndTokens(
       user,
       AUTH_PROVIDERS.LOCAL,
       device,
     );
-    this.logger.log(`User profile created: ${user.id}`);
-    return session;
+    this.logger.log(`User onboarding completed: ${user.id}`);
+    return authSession;
   }
 
   /**
@@ -544,6 +645,8 @@ export class AuthService {
     if (!user) {
       user = this.userRepo.create({
         email: payload.email,
+        // Apple sends fullName only on the very first sign-in via the client DTO
+        fullName: dto.fullName,
         isVerified: true,
         providerId: payload.sub,
         provider: AUTH_PROVIDERS.APPLE,
@@ -772,9 +875,13 @@ export class AuthService {
     return identifier;
   }
 
-  /** Generates a 6-digit random OTP string. */
+  /** Generates a 4-digit random OTP string. */
   private generateRandomOtp(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    const length = OTP_CONFIG.LENGTH;
+    const min = Math.pow(10, length - 1);
+    const max = Math.pow(10, length) - 1;
+
+    return Math.floor(min + Math.random() * (max - min)).toString();
   }
 
   /** Enforces per-identifier OTP request rate limiting via Redis; throws if the limit is exceeded. */
@@ -903,7 +1010,7 @@ export class AuthService {
         ? COMMON_CONFIG.OTP.bypassCode
         : this.generateRandomOtp();
 
-    const hashedOtp = await bcrypt.hash(otp, 6);
+    const hashedOtp = await bcrypt.hash(otp, BCRYPT_CONFIG.OTP_SALT_ROUNDS);
 
     const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${type}`;
 

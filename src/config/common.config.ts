@@ -12,7 +12,13 @@ export const COMMON_CONFIG = {
     rateLimitMax: env.Otp.rateLimitMax,
     rateLimitWindow: env.Otp.rateLimitWindow,
     maxVerifyAttempts: env.Otp.maxVerifyAttempts,
+    expiryMinutes: env.Otp.expiryMinutes,
+    onboardingSessionMinutes: env.Otp.onboardingSessionMinutes,
   },
+
+  APP: env.App,
+  MAIL: env.Mail,
+  SMTP: env.Smtp,
 
   REDIS: env.Redis,
   FACEBOOK: env.Facebook,
@@ -28,5 +34,10 @@ export const NODE_ENV_TYPE = {
 };
 
 export const OTP_CONFIG = {
-  LENGTH: 6,
+  LENGTH: 4,
+};
+
+export const BCRYPT_CONFIG = {
+  OTP_SALT_ROUNDS: 6,
+  PASSWORD_SALT_ROUNDS: 10,
 };

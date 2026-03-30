@@ -1,7 +1,13 @@
 export const AUTH_CONSTANTS = {
   OTP_REDIS_PREFIX: 'otp:',
-  OTP_TTL_SECONDS: parseInt(process.env.OTP_TTL_SECONDS || '600', 10),
-  TEMP_TOKEN_EXPIRES_IN: parseInt( process.env.TEMP_TOKEN_EXPIRES_IN || '1200', 10),
+  OTP_TTL_SECONDS: Number(process.env.OTP_EXPIRY_MINUTES) * 60,
+  // Controlled via ONBOARDING_SESSION_MINUTES env var (default 30 min).
+  // Must be >= time a user needs to complete: create-password → create-username → create-profile.
+  ONBOARDING_SESSION_TTL_SECONDS:
+    Number(process.env.ONBOARDING_SESSION_MINUTES || '30') * 60,
+  // Controlled via TEMP_TOKEN_EXPIRES_IN env var (default 40 min).
+  // Must be >= OTP_EXPIRY_MINUTES + ONBOARDING_SESSION_MINUTES + small buffer.
+  TEMP_TOKEN_EXPIRES_IN: parseInt( process.env.TEMP_TOKEN_EXPIRES_IN || '2400', 10),
   UNKNOWN_DEVICE: 'unknown',
 } as const;
 

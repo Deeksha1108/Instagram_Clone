@@ -3,6 +3,7 @@ import {
   ValidatorConstraint,
   ValidatorConstraintInterface,
 } from 'class-validator';
+import { AUTH_MESSAGES } from 'src/modules/auth/response/auth.response';
 
 @ValidatorConstraint({ name: 'loginIdentifier', async: false })
 export class LoginIdentifierConstraint implements ValidatorConstraintInterface {
@@ -15,6 +16,6 @@ export class LoginIdentifierConstraint implements ValidatorConstraintInterface {
   }
 
   defaultMessage(args: ValidationArguments) {
-    return 'Either email or username is required';
+    return AUTH_MESSAGES.PROVIDE_EMAIL_OR_USERNAME;
   }
 }
