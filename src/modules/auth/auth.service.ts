@@ -131,7 +131,7 @@ export class AuthService {
       { expiresIn: AUTH_CONSTANTS.TEMP_TOKEN_EXPIRES_IN },
     );
 
-    return { tempToken: token };
+    return { tempToken: token, maskedContact: this.maskContact(dto.email, dto.phone) };
   }
 
   /**
@@ -202,7 +202,9 @@ export class AuthService {
       verified: true,
     };
   }
-
+  /**
+   * Stores hashed password in Redis session after OTP verification (signup flow).
+   */
   async createPassword(
     dto: CreatePasswordDto,
     tempTokenData: TempTokenData,
@@ -249,6 +251,7 @@ export class AuthService {
     this.logger.log(`Password created for ${identifier}`);
   }
 
+  /* Validates uniqueness and stores username in Redis Session. */
   async createUsername(
     dto: CreateUsernameDto,
     tempTokenData: TempTokenData,
@@ -386,9 +389,10 @@ export class AuthService {
   }
 
   /**
-   * Authenticates a user with email/username + password and returns auth tokens.
+   * Validates credentials and returns session tokens.
+   * Supports login via email or username.
    */
-  async login(dto: LoginDto,device: string): Promise<LoginResponse> {
+  async login(dto: LoginDto, device: string): Promise<LoginResponse> {
     const identifier = dto.email || dto.username;
     const query = dto.email ? { email: dto.email, isVerified: true } : { username: dto.username, isVerified: true };
     const user = await this.userRepo.findOne({
@@ -437,8 +441,7 @@ export class AuthService {
   }
 
   /**
-   * Logs in or registers a user via Facebook access token;
-   * links to an existing account by email if found, otherwise creates a new one.
+   * Handles Facebook OAuth login/signup and links existing accounts if needed.
    */
   async facebookLogin(
     dto: FacebookLoginDto,
@@ -507,8 +510,7 @@ export class AuthService {
   }
 
   /**
-   * Logs in or registers a user via Google ID token;
-   * links to an existing account by email if found, otherwise creates a new one.
+   * Handles Google OAuth login/signup with token verification.
    */
   async googleLogin(
     dto: GoogleLoginDto,
@@ -597,8 +599,7 @@ export class AuthService {
   }
 
   /**
-   * Logs in or registers a user via Apple identity token;
-   * decodes token to extract user info, links existing account or creates a new one.
+   * Handles Apple OAuth login/signup using identity token.
    */
   async appleLogin(dto: AppleLoginDto, device: string): Promise<LoginResponse> {
     let payload: AppleJwtPayload;
@@ -714,8 +715,7 @@ export class AuthService {
   }
 
   /**
-   * Resets the user's password after verifying the forgot-password OTP;
-   * rejects if the new password is the same as the current one.
+   * Updates user password after OTP verification (forgot-password flow).
    */
   async resetPassword(
     dto: ResetPasswordDto,
@@ -756,7 +756,7 @@ export class AuthService {
       throw new BadRequestException(AUTH_MESSAGES.PASSWORD_MUST_BE_DIFFERENT);
     }
 
-    const hashedPassword = await bcrypt.hash(dto.newPassword, 8);
+    const hashedPassword = await bcrypt.hash(dto.newPassword, BCRYPT_CONFIG.PASSWORD_SALT_ROUNDS);
 
     await Promise.all([
       this.userRepo.update(user.id, { password: hashedPassword }),
@@ -767,8 +767,7 @@ export class AuthService {
   }
 
   /**
-   * Resends OTP if the previous session is still valid; rate-limited and
-   * respects the OTP bypass setting in dev/qa environments.
+   * Regenerates OTP if session is valid and not yet verfied.
    */
   async resendOtp(tempTokenData: TempTokenData): Promise<SendOtpResponse> {
     const identifier = this.getIdentifier({
@@ -814,11 +813,11 @@ export class AuthService {
 
     this.logger.log(`OTP resent successfully for ${identifier}`);
 
-    return { tempToken: token };
+    return { tempToken: token, maskedContact: this.maskContact( tempTokenData.email, tempTokenData.phoneNumber ) };
   }
 
   /**
-   * Deactivates the given session in DB and removes its refresh token from Redis.
+   * Invalidates a single session and removes its refresh token.
    */
   async logout(sessionId: string): Promise<void> {
     const session = await this.userSessionRepo.findOne({
@@ -839,7 +838,7 @@ export class AuthService {
   }
 
   /**
-   * Deactivates all active sessions for a user and clears their refresh tokens from Redis.
+   * Logged out user from all devices by invalidating all sessions.
    */
   async logoutAll(userId: string): Promise<void> {
     const sessions = await this.userSessionRepo.find({
@@ -866,7 +865,7 @@ export class AuthService {
   }
 
   // Helper functions
-  /** Returns email or phone as a single identifier string; throws if neither is provided. */
+  /** Returns unique identifier (email or phone) */
   private getIdentifier(data: { email?: string; phone?: string }): string {
     const identifier = data.email || data.phone;
     if (!identifier) {
@@ -875,7 +874,7 @@ export class AuthService {
     return identifier;
   }
 
-  /** Generates a 4-digit random OTP string. */
+  /** Generates numeric OTP of configured length */
   private generateRandomOtp(): string {
     const length = OTP_CONFIG.LENGTH;
     const min = Math.pow(10, length - 1);
@@ -884,7 +883,7 @@ export class AuthService {
     return Math.floor(min + Math.random() * (max - min)).toString();
   }
 
-  /** Enforces per-identifier OTP request rate limiting via Redis; throws if the limit is exceeded. */
+  /** Enforces OTP request rate limiting using Redis. */
   private async checkOtpRateLimit(identifier: string): Promise<void> {
     const key = `otp_rate_limit:${identifier}`;
 
@@ -902,17 +901,17 @@ export class AuthService {
     }
   }
 
-  /** Returns true if OTP bypass is enabled and the current environment is dev or QA. */
+  /** Checks if OTP bypass is enabled (dev/qa only) */
   private isOtpBypassAllowed() {
     return (
       COMMON_CONFIG.OTP.bypassEnabled &&
-      [NODE_ENV_TYPE.DEV, NODE_ENV_TYPE.QA].includes(COMMON_CONFIG.nodeEnv as string)
+      [NODE_ENV_TYPE.DEV, NODE_ENV_TYPE.QA].includes(
+        COMMON_CONFIG.nodeEnv as string,
+      )
     );
   }
 
-  /**
-   * Signs and returns access + refresh JWT tokens for the given session payload.
-   */
+  /** Generate access + refresh JWT tokens. */
   private generateJwtTokens(payload: {
     userId: string;
     username: string;
@@ -932,8 +931,7 @@ export class AuthService {
   }
 
   /**
-   * Persists a new session record in DB, stores the refresh token in Redis,
-   * and returns the access + refresh token pair.
+   * Creates session, stores refresh token, returns auth tokens
    */
   private async createUserSessionAndTokens(
     user: User,
@@ -974,7 +972,29 @@ export class AuthService {
       refreshToken,
     };
   }
+  /**
+   * Masks contact info for secure display (OTP screen).
+   * Email: a***@gmail.com / tes***@gmail.com
+   * Phone (E.164): +919876543210 → +91****3210
+   */
+  private maskContact(email?: string, phone?: string): string {
+    if (email) {
+      const [local = '', domain = ''] = email.split('@');
+      const visibleLength = Math.min(3, local.length);
+      const visiblePart = local.slice(0, visibleLength);
+      return `${visiblePart}***@${domain}`;
+    }
+    if (phone) {
+      const normalized = phone.trim();
+      const match = normalized.match(/^(\+\d{1,3})(\d{4,})$/);
+      if (!match) return '';
+      const [, countryCode, number] = match;
+      return `${countryCode}****${number.slice(-4)}`;
+    }
+    return '';
+  }
 
+  /** Deletes refresh tokens for given session IDs */
   private async invalidateSessions(sessionIds: string[]): Promise<void> {
     if (!sessionIds.length) return;
 
@@ -985,6 +1005,7 @@ export class AuthService {
     );
   }
 
+  /* TODO: Remove this function in future, it will not be needed. */
   private calculateAge(dob: Date): number {
     const today = new Date();
     let age = today.getFullYear() - dob.getFullYear();
@@ -998,6 +1019,10 @@ export class AuthService {
     return age;
   }
 
+  /**
+   * Generates OTP, hashes it, and stores in Redis.
+   * Sends email/SMS if not bypassed.
+   */
   private async generateAndStoreOtp(
     identifier: string,
     type: OtpType,
