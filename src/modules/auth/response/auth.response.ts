@@ -45,6 +45,7 @@ export const AUTH_MESSAGES = {
   USE_SOCIAL_LOGIN: 'Password not set. Please login using social account or reset your password.',
   USER_UNDERAGE: 'You must be at least 18 years old to register.',
   INVALID_PHONE_NUMBER: 'Please enter a valid phone number.',
+  INVALID_EMAIL: 'Please enter a valid email address.',
   COUNTRY_CODE_REQUIRED: 'Country code is required when phone is provided.',
   INVALID_COUNTRY_CODE: 'Please enter a valid country code.',
   PROVIDE_EMAIL_OR_PHONE: 'Provide either email or phone.',

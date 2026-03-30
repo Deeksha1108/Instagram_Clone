@@ -1,5 +1,6 @@
 export interface SendOtpResponse {
   tempToken: string;
+  maskedContact: string;
 }
 
 export interface VerifyOtpResponse {
