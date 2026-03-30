@@ -1,7 +1,7 @@
 import { Column, Entity, Index, OneToMany } from 'typeorm';
 import { BaseEntity } from 'src/common/entities/base.entity';
 import { AUTH_PROVIDERS } from 'src/common/constants/constants';
-import { Gender } from 'src/common/enum/enum.common';
+import { ACCOUNT_TYPE, Gender, INTERESTS } from 'src/common/enum/enum.common';
 import { SavedPost } from 'src/modules/post/entities/saved-post.entity';
 import { PostTag } from 'src/modules/post/entities/post-tag.entity';
 import { Post } from 'src/modules/post/entities/post.entity';
@@ -71,6 +71,22 @@ export class User extends BaseEntity {
 
   @Column({ default: true })
   showSuggestions: boolean;
+
+  @Column({ nullable: true })
+  website: string;
+
+  @Column({ nullable: true })
+  pronouns: string;
+
+  @Column({
+    type: 'enum',
+    enum: ACCOUNT_TYPE,
+    nullable: true,
+  })
+  accountType: ACCOUNT_TYPE;
+
+  @Column('text', { array: true, default: [] })
+  interests: string[];
 
   // RELATIONS
   @OneToMany(() => Post, (post) => post.user)

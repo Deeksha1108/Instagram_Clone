@@ -21,6 +21,11 @@ export const envConfiguration = () => ({
     rateLimitMax: Number(process.env.OTP_RATE_LIMIT_MAX),
     rateLimitWindow: Number(process.env.OTP_RATE_LIMIT_WINDOW_SECONDS),
     maxVerifyAttempts: Number(process.env.OTP_MAX_VERIFY_ATTEMPTS),
+
+    expiryMinutes: Number(process.env.OTP_EXPIRY_MINUTES),
+    onboardingSessionMinutes: Number(
+      process.env.ONBOARDING_SESSION_MINUTES || '30',
+    ),
   },
 
   Facebook: {
@@ -45,5 +50,15 @@ export const envConfiguration = () => ({
     secure: process.env.SMTP_SECURE === 'true',
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
+  },
+
+  Mail: {
+    otpSubject: process.env.MAIL_OTP_SUBJECT,
+  },
+
+  App: {
+    name: process.env.APP_NAME,
+    SEND_OTP_BASIC_USER: process.env.SEND_OTP_BASIC_USER,
+    SEND_OTP_BASIC_PASS: process.env.SEND_OTP_BASIC_PASS,
   },
 });

@@ -31,3 +31,23 @@ export enum ConnectionType {
   FOLLOWERS = 'FOLLOWERS',
   FOLLOWING = 'FOLLOWING',
 }
+
+export enum INTERESTS {
+  TRAVEL = 'Travel',
+  FITNESS = 'Fitness',
+  TECHNOLOGY = 'Technology',
+  FOOD = 'Food',
+  PHOTOGRAPHY = 'Photography',
+  MUSIC = 'Music',
+  GAMING = 'Gaming',
+  FASHION = 'Fashion',
+  BUSINESS = 'Business',
+  LEARNING = 'Learning',
+  SPORTS = 'Sports',
+}
+
+export enum ACCOUNT_TYPE {
+  PERSONAL = 'personal',
+  CREATOR = 'creator',
+  BUSINESS = 'business',
+}

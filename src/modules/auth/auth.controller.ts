@@ -32,6 +32,8 @@ import { ResponseMessage } from 'src/common/decorators/response.decorator';
 import { GoogleLoginDto } from './dto/google.dto';
 import { AppleLoginDto } from './dto/apple.dto';
 import { SetUsernameDto } from './dto/setUsername.dto';
+import { CreatePasswordDto } from './dto/create-password.dto';
+import { CreateUsernameDto } from './dto/create-username.dto';
 
 @ApiTags('Auth Module')
 @Controller('auth')
@@ -60,10 +62,36 @@ export class AuthController {
     return this.authService.verifyOtp(dto, req.tempTokenData);
   }
 
+  @Post('create-password')
+  @UseGuards(TempTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create password after OTP verification' })
+  @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.PASSWORD_CREATED)
+  createPassword(
+    @Body() dto: CreatePasswordDto,
+    @Req() req: RequestWithTempToken,
+  ) {
+    return this.authService.createPassword(dto, req.tempTokenData);
+  }
+
+  @Post('create-username')
+  @UseGuards(TempTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create username during onboarding' })
+  @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.USERNAME_SET_SUCCESS)
+  createUsername(
+    @Body() dto: CreateUsernameDto,
+    @Req() req: RequestWithTempToken,
+  ) {
+    return this.authService.createUsername(dto, req.tempTokenData);
+  }
+
   @Post('create-profile')
   @UseGuards(TempTokenGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Create user profile after OTP verification' })
+  @ApiOperation({ summary: 'Complete onboarding & create user profile' })
   @HttpCode(201)
   @ResponseMessage(AUTH_MESSAGES.PROFILE_CREATED)
   createProfile(
