@@ -5,6 +5,7 @@ const env = envConfiguration();
 export const COMMON_CONFIG = {
   nodeEnv: env.nodeEnv,
   jwt: env.Jwt,
+  AWS: env.Aws,
   OTP: {
     bypassEnabled: env.Otp.bypassEnabled,
     bypassCode: env.Otp.bypassCode,
