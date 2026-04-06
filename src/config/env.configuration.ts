@@ -61,4 +61,14 @@ export const envConfiguration = () => ({
     SEND_OTP_BASIC_USER: process.env.SEND_OTP_BASIC_USER,
     SEND_OTP_BASIC_PASS: process.env.SEND_OTP_BASIC_PASS,
   },
+
+  Aws: {
+    accessKeyId: process.env.AWS_ACCESS_KEY,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    region: process.env.AWS_REGION,
+    bucket: process.env.AWS_S3_BUCKET,
+    cloudfrontUrl: process.env.CLOUDFRONT_URL,
+    signedUrlExpiry: Number(process.env.AWS_SIGNED_URL_EXPIRY),
+    folder: process.env.AWS_S3_FOLDER,
+  },
 });

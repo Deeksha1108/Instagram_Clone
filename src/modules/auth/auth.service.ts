@@ -85,13 +85,12 @@ export class AuthService {
    */
   async sendOtp(dto: SendOtpDto): Promise<SendOtpResponse> {
     const identifier = this.getIdentifier({ email: dto.email, phone: dto.phone });
-    const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${dto.type}`;
+    const rateLimitKey = `otp_rate_limit:${identifier}:${dto.type}`;
 
-    await this.checkOtpRateLimit(redisKey);
+    await this.checkOtpRateLimit(rateLimitKey);
 
-    const user = await this.userRepo.findOne({
+    const user = await this.userRepo.exist({
       where: dto.email ? { email: dto.email } : { phone: dto.phone },
-      select: ['id'],
     });
 
     if (dto.type === OtpType.SIGNUP && user) {
@@ -135,8 +134,10 @@ export class AuthService {
   }
 
   /**
-   * Verifies the OTP for a given identifier; tracks attempts to prevent brute force
-   * and marks the Redis session as verified on success.
+   * Verifies OTP for signup/forgot-password flow.
+   * - Prevents brute-force via attempt tracking in Redis
+   * - Validates OTP (or bypass in dev/qa)
+   * - Marks session as verified and extends TTL for onboarding
    */
   async verifyOtp(
     dto: VerifyOtpDto,
@@ -147,6 +148,7 @@ export class AuthService {
       phone: tempTokenData.phoneNumber,
     });
     const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${tempTokenData.type}`;
+    const attemptsKey = `${redisKey}:attempts`;
     const session = await this.redisService.get(redisKey);
 
     if (!session) {
@@ -158,7 +160,8 @@ export class AuthService {
       this.logger.warn(`OTP already verified attempt for ${identifier}`);
       throw new BadRequestException(AUTH_MESSAGES.OTP_ALREADY_VERIFIED);
     }
-    if (session.verifyAttempts >= COMMON_CONFIG.OTP.maxVerifyAttempts) {
+    const attempts = Number(await this.redisService.get(attemptsKey));
+    if (attempts >= COMMON_CONFIG.OTP.maxVerifyAttempts) {
       this.logger.warn(`OTP verify attempts exceeded for ${identifier}`);
       throw new ForbiddenException(AUTH_MESSAGES.TOO_MANY_VERIFY_OTP_ATTEMPTS);
     }
@@ -169,32 +172,27 @@ export class AuthService {
 
     if (bypassAllowed && dto.otp === COMMON_CONFIG.OTP.bypassCode) {
       isMatch = true;
+      isMatch = true;
     } else if (dto.otp.length !== OTP_CONFIG.LENGTH) {
       isMatch = false;
     } else {
       isMatch = await bcrypt.compare(dto.otp, session.otp);
     }
     if (!isMatch) {
-      session.verifyAttempts += 1;
-
-      await this.redisService.set(
-        redisKey,
-        session,
+      await this.redisService.incrWithExpire(
+        attemptsKey,
         AUTH_CONSTANTS.OTP_TTL_SECONDS,
       );
-
       this.logger.warn(`Invalid OTP attempt for ${identifier}`);
-
       throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP);
     }
-    session.verified = true;
 
-    // Extend TTL so the user has ample time to complete all remaining onboarding
-    // steps (create-password → create-username → create-profile) without the
-    // Redis session expiring mid-flow.
     await this.redisService.set(
       redisKey,
-      session,
+      {
+        ...session,
+        verified: true,
+      },
       AUTH_CONSTANTS.ONBOARDING_SESSION_TTL_SECONDS,
     );
     this.logger.log(`OTP verified successfully for ${identifier}`);
@@ -220,17 +218,9 @@ export class AuthService {
 
     const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${tempTokenData.type}`;
 
-    const session = await this.redisService.get(redisKey);
-
-    if (!session) {
-      throw new NotFoundException(AUTH_MESSAGES.OTP_SESSION_EXPIRED);
-    }
-
-    if (!session.verified) {
-      throw new UnauthorizedException(AUTH_MESSAGES.OTP_NOT_VERIFIED);
-    }
-
-    // prevent overwrite
+    const session = await this.getValidatedSession(redisKey, {
+      requireVerified: true,
+    });
     if (session.password) {
       throw new BadRequestException(AUTH_MESSAGES.PASSWORD_ALREADY_SET);
     }
@@ -263,32 +253,21 @@ export class AuthService {
 
     const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${tempTokenData.type}`;
 
-    const session = await this.redisService.get(redisKey);
+    const session = await this.getValidatedSession(redisKey, {
+      requireVerified: true,
+      requirePassword: true,
+    });
 
-    if (!session) {
-      throw new NotFoundException(AUTH_MESSAGES.OTP_SESSION_EXPIRED);
+    if (session.username) {
+      throw new BadRequestException(AUTH_MESSAGES.USERNAME_ALREADY_SET);
     }
 
-    if (!session.verified) {
-      throw new UnauthorizedException(AUTH_MESSAGES.OTP_NOT_VERIFIED);
-    }
-
-    if (!session.password) {
-      throw new BadRequestException(AUTH_MESSAGES.PASSWORD_NOT_SET);
-    }
-
-    // Duplicate check (IMPORTANT)
     const exists = await this.userRepo.exist({
       where: { username: dto.username },
     });
 
     if (exists) {
       throw new BadRequestException(AUTH_MESSAGES.USERNAME_TAKEN);
-    }
-
-    // prevent overwrite
-    if (session.username) {
-      throw new BadRequestException(AUTH_MESSAGES.USERNAME_ALREADY_SET);
     }
 
     session.username = dto.username;
@@ -308,36 +287,21 @@ export class AuthService {
     tempTokenData: TempTokenData,
     device: string,
   ): Promise<CreateProfileResponse> {
+    if (tempTokenData.type === OtpType.FORGOT_PASSWORD) {
+      throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP_TYPE);
+    }
     const identifier = this.getIdentifier({
       email: tempTokenData.email,
       phone: tempTokenData.phoneNumber,
     });
     const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${tempTokenData.type}`;
 
-    const session = await this.redisService.get(redisKey);
+    const session = await this.getValidatedSession(redisKey, {
+      requireVerified: true,
+      requirePassword: true,
+      requireUsername: true,
+    });
 
-    // guards
-    if (!session) {
-      throw new NotFoundException(AUTH_MESSAGES.OTP_SESSION_EXPIRED);
-    }
-
-    if (tempTokenData.type === OtpType.FORGOT_PASSWORD) {
-      throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP_TYPE);
-    }
-
-    if (!session.verified) {
-      throw new UnauthorizedException(AUTH_MESSAGES.OTP_NOT_VERIFIED);
-    }
-
-    if (!session.password) {
-      throw new BadRequestException(AUTH_MESSAGES.PASSWORD_NOT_SET);
-    }
-
-    if (!session.username) {
-      throw new BadRequestException(AUTH_MESSAGES.USERNAME_NOT_SET);
-    }
-
-    // final DB write (atomic)
     const user = this.userRepo.create({
       ...(tempTokenData.email && { email: tempTokenData.email }),
       ...(tempTokenData.phoneNumber && { phone: tempTokenData.phoneNumber }),
@@ -682,12 +646,8 @@ export class AuthService {
       },
     });
 
-    if (!session) {
+    if (!session || session.expiresAt < new Date()) {
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_REFRESH_TOKEN);
-    }
-
-    if (session.expiresAt < new Date()) {
-      throw new UnauthorizedException(AUTH_MESSAGES.SESSION_EXPIRED);
     }
 
     const key = `${REDIS_KEYS.REFRESH_TOKEN}:${payload.sessionId}`;
@@ -1057,5 +1017,30 @@ export class AuthService {
     if (phone && !bypassAllowed) {
       // integrate SMS provider here
     }
+  }
+
+  private async getValidatedSession(
+    redisKey: string,
+    options?: {
+      requireVerified?: boolean;
+      requirePassword?: boolean;
+      requireUsername?: boolean;
+    },
+  ) {
+    const session = await this.redisService.get(redisKey);
+
+    if (!session) {
+      throw new NotFoundException(AUTH_MESSAGES.OTP_SESSION_EXPIRED);
+    }
+    if (options?.requireVerified && !session.verified) {
+      throw new UnauthorizedException(AUTH_MESSAGES.OTP_NOT_VERIFIED);
+    }
+    if (options?.requirePassword && !session.password) {
+      throw new BadRequestException(AUTH_MESSAGES.PASSWORD_NOT_SET);
+    }
+    if (options?.requireUsername && !session.username) {
+      throw new BadRequestException(AUTH_MESSAGES.USERNAME_NOT_SET);
+    }
+    return session;
   }
 }

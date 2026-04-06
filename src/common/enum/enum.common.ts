@@ -51,3 +51,13 @@ export enum ACCOUNT_TYPE {
   CREATOR = 'creator',
   BUSINESS = 'business',
 }
+
+export enum UploadTarget {
+  POST = 'post',
+  PROFILE = 'profile',
+}
+
+export enum FILE_TYPE {
+  IMAGE = 'image',
+  VIDEO = 'video',
+}
