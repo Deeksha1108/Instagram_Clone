@@ -1,5 +1,5 @@
 import * as jwt from 'jsonwebtoken';
-import jwksClient, { SigningKey } from 'jwks-rsa';
+import jwksClient from 'jwks-rsa';
 import { COMMON_CONFIG, NODE_ENV_TYPE } from 'src/config/common.config';
 import { AppleJwtPayload } from 'src/modules/auth/interfaces/auth-response.interface';
 
@@ -24,12 +24,13 @@ const getKey: jwt.GetPublicKeyOrSecret = (header, callback) => {
     return callback(new Error('Missing kid in token'), undefined);
   }
 
-  jwks.getSigningKey(header.kid, (err, key: SigningKey) => {
+  jwks.getSigningKey(header.kid, (err, key) => {
     if (err || !key) {
       return callback(err || new Error('Signing key not found'), undefined);
     }
 
-    callback(null, key.getPublicKey());
+    const signingKey = key;
+    callback(null, signingKey.getPublicKey());
   });
 };
 

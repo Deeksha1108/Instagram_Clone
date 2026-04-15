@@ -6,18 +6,18 @@ export class GenerateUploadUrlDto {
   @ApiProperty({ example: 'image.png' })
   @IsString()
   @IsNotEmpty()
-  fileName: string;
+  fileName!: string;
 
   @ApiProperty({ example: 'image/png' })
   @IsString()
   @IsNotEmpty()
-  fileType: string;
+  fileType!: string;
 
   @ApiProperty({ enum: UploadTarget, example: UploadTarget.POST })
   @IsEnum(UploadTarget)
-  target: UploadTarget;
+  target!: UploadTarget;
 
   @ApiProperty({ enum: FILE_TYPE, example: FILE_TYPE.IMAGE })
   @IsEnum(FILE_TYPE)
-  fileCategory: FILE_TYPE;
+  fileCategory!: FILE_TYPE;
 }

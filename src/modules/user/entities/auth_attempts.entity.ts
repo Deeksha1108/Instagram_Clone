@@ -6,21 +6,21 @@ import { AttemptStatus, AttemptType } from 'src/common/enum/enum.common';
 export class AuthAttempt extends BaseEntity {
   @Index()
   @Column({ nullable: true })
-  email: string;
+  email?: string;
 
   @Index()
   @Column({ nullable: true })
-  phone: string;
+  phone?: string;
 
   @Column({
     type: 'enum',
     enum: AttemptType,
   })
-  attemptType: AttemptType;
+  attemptType!: AttemptType;
 
   @Column({
     type: 'enum',
     enum: AttemptStatus,
   })
-  status: AttemptStatus;
+  status!: AttemptStatus;
 }

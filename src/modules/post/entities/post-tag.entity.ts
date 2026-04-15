@@ -4,19 +4,19 @@ import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { Post } from './post.entity';
 
 @Entity('post_tags')
-@Index(['userId', 'postId'])
+@Index(['userId', 'postId'], { unique: true })
 export class PostTag extends BaseEntity {
   @Column({ name: 'user_id' })
-  userId: string;
+  userId!: string;
 
   @Column({ name: 'post_id' })
-  postId: string;
+  postId!: string;
 
   @ManyToOne(() => User, (user) => user.taggedPosts, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
-  user: User;
+  user!: User;
 
   @ManyToOne(() => Post, (post) => post.taggedUsers, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'post_id' })
-  post: Post;
+  post!: Post;
 }

@@ -1,7 +1,7 @@
 import { Column, Entity, Index, OneToMany } from 'typeorm';
 import { BaseEntity } from 'src/common/entities/base.entity';
 import { AUTH_PROVIDERS } from 'src/common/constants/constants';
-import { ACCOUNT_TYPE, Gender, INTERESTS } from 'src/common/enum/enum.common';
+import { ACCOUNT_TYPE, Gender } from 'src/common/enum/enum.common';
 import { SavedPost } from 'src/modules/post/entities/saved-post.entity';
 import { PostTag } from 'src/modules/post/entities/post-tag.entity';
 import { Post } from 'src/modules/post/entities/post.entity';
@@ -14,95 +14,95 @@ import { Follow } from 'src/modules/follow/entities/follow.entity';
 @Index(['provider', 'providerId'], {unique: true, where: `"providerId" IS NOT NULL`})
 export class User extends BaseEntity {
   @Column({ nullable: true, unique: true })
-  email: string;
+  email?: string;
 
   @Column({ nullable: true, unique: true })
-  phone: string;
+  phone?: string;
 
   @Column({ default: false })
-  isVerified: boolean;
+  isVerified!: boolean;
 
   @Column({ nullable: true })
-  fullName: string;
+  fullName?: string;
 
   @Column({ unique: true, nullable: true })
-  username: string;
+  username?: string;
 
   @Column({ nullable: true })
-  age: number;
+  age?: number;
 
   @Column({ type: 'date', nullable: true })
-  dateOfBirth: Date;
+  dateOfBirth?: Date;
 
   @Column({ type: 'smallint', nullable: true })
-  gender: Gender;
+  gender?: Gender;
 
   @Column({ nullable: true, select: false })
-  password: string;
+  password?: string;
 
   @Column({
     type: 'enum',
     enum: AUTH_PROVIDERS,
     default: AUTH_PROVIDERS.LOCAL,
   })
-  provider: AUTH_PROVIDERS;
+  provider!: AUTH_PROVIDERS;
 
   @Column({ nullable: true })
   @Index()
-  providerId: string;
+  providerId?: string;
 
   @Column({ nullable: true, length: 150 })
-  bio: string;
+  bio?: string;
 
   @Column({ nullable: true })
-  profilePicture: string;
+  profilePicture?: string;
 
   @Column({ default: false })
-  isPrivate: boolean;
+  isPrivate!: boolean;
 
   @Column({ default: 0 })
-  postsCount: number;
+  postsCount!: number;
 
   @Column({ default: 0 })
-  followersCount: number;
+  followersCount!: number;
 
   @Column({ default: 0 })
-  followingCount: number;
+  followingCount!: number;
 
   @Column({ default: true })
-  showSuggestions: boolean;
+  showSuggestions!: boolean;
 
   @Column({ nullable: true })
-  website: string;
+  website?: string;
 
   @Column({ nullable: true })
-  pronouns: string;
+  pronouns?: string;
 
   @Column({
     type: 'enum',
     enum: ACCOUNT_TYPE,
     nullable: true,
   })
-  accountType: ACCOUNT_TYPE;
+  accountType?: ACCOUNT_TYPE;
 
   @Column('text', { array: true, default: [] })
-  interests: string[];
+  interests!: string[];
 
   // RELATIONS
   @OneToMany(() => Post, (post) => post.user)
-  posts: Post[];
+  posts!: Post[];
 
   @OneToMany(() => SavedPost, (sp) => sp.user)
-  savedPosts: SavedPost[];
+  savedPosts!: SavedPost[];
 
   @OneToMany(() => PostTag, (pt) => pt.user)
-  taggedPosts: PostTag[];
+  taggedPosts!: PostTag[];
 
   // People who follow me
   @OneToMany(() => Follow, (f) => f.following)
-  followers: Follow[];
+  followers!: Follow[];
 
   // People I follow
   @OneToMany(() => Follow, (f) => f.follower)
-  following: Follow[];
+  following!: Follow[];
 }

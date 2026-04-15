@@ -8,13 +8,13 @@ import {
   MaxLength,
   IsUrl,
 } from 'class-validator';
-import { INTERESTS, ACCOUNT_TYPE, Gender } from 'src/common/enum/enum.common';
+import { INTERESTS, ACCOUNT_TYPE } from 'src/common/enum/enum.common';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateProfileDto {
   @ApiProperty({ example: 'Deeksha Singh' })
   @IsString()
-  fullName: string;
+  fullName!: string;
 
   @ApiProperty({ example: 'Bio text...' })
   @IsOptional()
@@ -47,5 +47,5 @@ export class CreateProfileDto {
 
   @ApiProperty({ example: 'personal' })
   @IsEnum(ACCOUNT_TYPE, { message: 'Invalid account type selected.' })
-  accountType: ACCOUNT_TYPE;
+  accountType!: ACCOUNT_TYPE;
 }

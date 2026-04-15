@@ -874,7 +874,7 @@ export class AuthService {
   /** Generate access + refresh JWT tokens. */
   private generateJwtTokens(payload: {
     userId: string;
-    username: string;
+    username?: string;
     sessionId: string;
   }) {
     const accessToken = this.jwtService.sign(payload, {

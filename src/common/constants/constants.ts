@@ -1,4 +1,4 @@
-import { FILE_TYPE, UploadTarget } from '../enum/enum.common';
+import { FILE_TYPE } from '../enum/enum.common';
 export const AUTH_CONSTANTS = {
   OTP_REDIS_PREFIX: 'otp:',
   OTP_TTL_SECONDS: Number(process.env.OTP_EXPIRY_MINUTES) * 60,
@@ -45,15 +45,8 @@ export const UPLOAD_FILE_TYPE_MAP: Record<FILE_TYPE, { mimeTypes: string[] }> =
     },
   };
 
-export const UPLOAD_TARGET_FOLDER_MAP: Record<
-  UploadTarget,
-  Partial<Record<FILE_TYPE, string>>
-> = {
-  [UploadTarget.POST]: {
-    [FILE_TYPE.IMAGE]: 'post/images',
-    [FILE_TYPE.VIDEO]: 'post/videos',
-  },
-  [UploadTarget.PROFILE]: {
-    [FILE_TYPE.IMAGE]: 'profile/images',
-  },
+export const S3_PATHS = {
+  POSTS: 'posts',
+  PROFILE: 'profile',
+  DRAFT: 'draft',
 };

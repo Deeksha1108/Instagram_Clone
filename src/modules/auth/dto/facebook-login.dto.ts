@@ -7,5 +7,5 @@ export class FacebookLoginDto {
   })
   @IsString()
   @IsNotEmpty()
-  accessToken: string;
+  accessToken!: string;
 }

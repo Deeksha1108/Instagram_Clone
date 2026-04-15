@@ -1,6 +1,14 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsEmail, IsEnum, IsOptional, IsString, Matches, Validate, ValidateIf } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+  Matches,
+  Validate,
+  ValidateIf,
+} from 'class-validator';
 import { OtpType } from 'src/common/enum/enum.common';
 import { IsE164PhoneConstraint } from 'src/common/validators/phone.validator';
 import { AUTH_MESSAGES } from '../response/auth.response';
@@ -18,7 +26,12 @@ export class SendOtpDto {
   @Matches(/^\+[1-9]\d{0,3}$/, { message: AUTH_MESSAGES.INVALID_COUNTRY_CODE })
   countryCode?: string;
 
-  @ApiProperty({ example: '9876543210', required: false, description: 'Local phone digits — combined with countryCode into E.164 format server-side' })
+  @ApiProperty({
+    example: '9876543210',
+    required: false,
+    description:
+      'Local phone digits — combined with countryCode into E.164 format server-side',
+  })
   @IsOptional()
   @Transform(({ value, obj }) => {
     if (!value) return value;
@@ -35,7 +48,7 @@ export class SendOtpDto {
     description: 'Purpose of OTP: SIGNUP or FORGOT_PASSWORD',
   })
   @IsEnum(OtpType)
-  type: OtpType;
+  type!: OtpType;
 
   @Validate(SendOtpValidator)
   _check?: any;

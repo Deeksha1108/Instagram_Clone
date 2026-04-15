@@ -9,5 +9,5 @@ export class CreatePasswordDto {
   @Matches(/(?=.*[A-Z])/, {message: 'Password must contain at least one uppercase letter.'})
   @Matches(/(?=.*\d)/, {message: 'Password must contain at least one number.'})
   @Matches(/(?=.*[!@#$%^&*])/, {message: 'Password must contain at least one special character.'})
-  password: string;
+  password!: string;
 }

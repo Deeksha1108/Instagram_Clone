@@ -6,7 +6,7 @@ import { otpTemplate } from './templates/otp.template';
 @Injectable()
 export class MailerService implements OnModuleInit {
   private readonly logger = new Logger(MailerService.name);
-  private transporter: Transporter;
+  private transporter!: Transporter;
 
   async onModuleInit() {
     this.transporter = nodemailer.createTransport({
@@ -25,7 +25,7 @@ export class MailerService implements OnModuleInit {
   async sendOtpEmail(to: string, otp: string): Promise<void> {
     try {
       const expiryMinutes = COMMON_CONFIG.OTP.expiryMinutes;
-      const info = await this.transporter.sendMail({
+      await this.transporter.sendMail({
         from: `"${COMMON_CONFIG.APP.name}" <${COMMON_CONFIG.SMTP.user}>`,
         to,
         subject: COMMON_CONFIG.MAIL.otpSubject,
@@ -34,7 +34,8 @@ export class MailerService implements OnModuleInit {
 
       this.logger.log(`OTP email sent to: ${to}`);
     } catch (err) {
-      this.logger.error(`Failed to send OTP email to ${to}: ${err.message}`);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      this.logger.error(`Failed to send OTP email to ${to}: ${errorMessage}`);
       throw err;
     }
   }

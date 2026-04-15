@@ -17,7 +17,7 @@ import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { TempTokenGuard } from 'src/common/guards/temp-token.guard';
-import type { RequestWithTempToken } from 'src/common/types/auth.types';
+import type { JwtPayload, RequestWithTempToken } from 'src/common/types/auth.types';
 import { BasicAuthGuard } from 'src/common/guards/basic-auth.guard';
 import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -108,7 +108,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Set username after social login' })
   @HttpCode(200)
   @ResponseMessage(AUTH_MESSAGES.USERNAME_SET_SUCCESS)
-  setUsername(@Body() dto: SetUsernameDto, @CurrentUser() user) {
+  setUsername(@Body() dto: SetUsernameDto, @CurrentUser() user: JwtPayload) {
     return this.authService.setUsername(user.userId, dto);
   }
 

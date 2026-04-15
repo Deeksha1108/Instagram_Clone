@@ -9,6 +9,6 @@ export class CreateUsernameDto {
   @MaxLength(30, { message: AUTH_MESSAGES.USERNAME_INVALID_FORMAT })
   @Matches(/^[a-zA-Z0-9._]+$/, { message: AUTH_MESSAGES.USERNAME_INVALID_FORMAT })
   @Matches(/^(?!.*\.\.)/, { message: AUTH_MESSAGES.USERNAME_INVALID_FORMAT })
-  @Matches(/^(?!\.).*(?<!\.)$/, { message: AUTH_MESSAGES.USERNAME_DOT_POSITION })
-  username: string;
+  @Matches(/^(?!\.).*(?<!\.)$/, { message: AUTH_MESSAGES.USERNAME_DOT_POSITION, })
+  username!: string;
 }

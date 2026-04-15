@@ -4,7 +4,7 @@ import { COMMON_CONFIG } from 'src/config/common.config';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
-  private client: Redis;
+  private client!: Redis;
 
   onModuleInit() {
     this.client = new Redis({

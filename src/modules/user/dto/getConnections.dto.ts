@@ -5,7 +5,7 @@ import { ConnectionType } from 'src/common/enum/enum.common';
 export class GetConnectionsDto {
   @ApiProperty({ enum: ConnectionType })
   @IsEnum(ConnectionType)
-  type: ConnectionType;
+  type!: ConnectionType;
 
   @IsOptional()
   cursor?: string;

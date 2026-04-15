@@ -7,5 +7,5 @@ export class VerifyOtpDto {
   @Length(OTP_CONFIG.LENGTH, OTP_CONFIG.LENGTH)
   @Matches(/^\d+$/, { message: 'OTP must be numeric' })
   @IsString()
-  otp: string;
+  otp!: string;
 }

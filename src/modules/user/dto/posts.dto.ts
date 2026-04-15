@@ -5,7 +5,7 @@ import { PostType } from 'src/common/enum/enum.common';
 export class GetPostsDto {
   @ApiProperty({ enum: PostType })
   @IsEnum(PostType)
-  type: PostType;
+  type!: PostType;
 
   @ApiPropertyOptional()
   @IsOptional()

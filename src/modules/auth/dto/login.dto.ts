@@ -1,11 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsOptional,
-  IsEmail,
-  IsPhoneNumber,
-  IsString,
-  Validate,
-} from 'class-validator';
+import { IsOptional, IsEmail, IsString, Validate } from 'class-validator';
 import { LoginIdentifierConstraint } from 'src/common/validators/login.validator';
 
 export class LoginDto {
@@ -21,7 +15,7 @@ export class LoginDto {
 
   @ApiProperty({ example: 'Pass@123' })
   @IsString()
-  password: string;
+  password!: string;
 
   @Validate(LoginIdentifierConstraint)
   _check?: any;

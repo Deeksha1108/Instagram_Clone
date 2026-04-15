@@ -8,5 +8,5 @@ export class BulkUploadDto {
   @ValidateNested({ each: true })
   @Type(() => GenerateUploadUrlDto)
   @ArrayMinSize(1)
-  files: GenerateUploadUrlDto[];
+  files!: GenerateUploadUrlDto[];
 }

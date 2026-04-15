@@ -5,5 +5,5 @@ export class GoogleLoginDto {
   @ApiProperty({ description: 'Google ID token from client' })
   @IsString()
   @IsNotEmpty()
-  idToken: string;
+  idToken!: string;
 }
