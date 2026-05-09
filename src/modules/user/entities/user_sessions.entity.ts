@@ -8,32 +8,32 @@ import { AUTH_PROVIDERS } from 'src/common/constants/constants';
 export class UserSession extends BaseEntity {
   @ManyToOne(() => User, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
-  user: User;
+  user!: User;
 
   @Index()
-  @Column()
-  userId: string;
+  @Column({ name: 'user_id' })
+  userId!: string;
 
   @Index()
   @Column({ unique: true })
-  sessionId: string;
+  sessionId!: string;
 
   @Column({ nullable: true })
-  device: string;
+  device?: string;
 
   @Column({
     type: 'enum',
     enum: AUTH_PROVIDERS,
     default: AUTH_PROVIDERS.LOCAL,
   })
-  loginProvider: AUTH_PROVIDERS;
+  loginProvider!: AUTH_PROVIDERS;
 
   @Column({ type: 'timestamp' })
-  loginAt: Date;
+  loginAt!: Date;
 
   @Column({ type: 'timestamp' })
-  expiresAt: Date;
+  expiresAt!: Date;
 
   @Column({ default: true })
-  isActive: boolean;
+  isActive!: boolean;
 }

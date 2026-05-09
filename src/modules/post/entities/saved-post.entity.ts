@@ -7,16 +7,16 @@ import { BaseEntity } from 'src/common/entities/base.entity';
 @Index(['userId', 'postId'], { unique: true })
 export class SavedPost extends BaseEntity {
   @Column({ name: 'user_id' })
-  userId: string;
+  userId!: string;
 
   @Column({ name: 'post_id' })
-  postId: string;
+  postId!: string;
 
   @ManyToOne(() => User, (user) => user.savedPosts, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
-  user: User;
+  user!: User;
 
   @ManyToOne(() => Post, (post) => post.savedBy, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'post_id' })
-  post: Post;
+  post!: Post;
 }

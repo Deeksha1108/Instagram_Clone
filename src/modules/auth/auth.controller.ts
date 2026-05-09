@@ -17,7 +17,7 @@ import { SendOtpDto } from './dto/send-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { CreateProfileDto } from './dto/create-profile.dto';
 import { TempTokenGuard } from 'src/common/guards/temp-token.guard';
-import type { RequestWithTempToken } from 'src/common/types/auth.types';
+import type { JwtPayload, RequestWithTempToken } from 'src/common/types/auth.types';
 import { BasicAuthGuard } from 'src/common/guards/basic-auth.guard';
 import { LoginDto } from './dto/login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -29,6 +29,11 @@ import { JwtRefreshGuard } from 'src/common/guards/jwt-refresh.guard';
 import type { RefreshTokenPayload } from './interfaces/auth-response.interface';
 import { AUTH_MESSAGES } from './response/auth.response';
 import { ResponseMessage } from 'src/common/decorators/response.decorator';
+import { GoogleLoginDto } from './dto/google.dto';
+import { AppleLoginDto } from './dto/apple.dto';
+import { SetUsernameDto } from './dto/setUsername.dto';
+import { CreatePasswordDto } from './dto/create-password.dto';
+import { CreateUsernameDto } from './dto/create-username.dto';
 
 @ApiTags('Auth Module')
 @Controller('auth')
@@ -57,10 +62,36 @@ export class AuthController {
     return this.authService.verifyOtp(dto, req.tempTokenData);
   }
 
+  @Post('create-password')
+  @UseGuards(TempTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create password after OTP verification' })
+  @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.PASSWORD_CREATED)
+  createPassword(
+    @Body() dto: CreatePasswordDto,
+    @Req() req: RequestWithTempToken,
+  ) {
+    return this.authService.createPassword(dto, req.tempTokenData);
+  }
+
+  @Post('create-username')
+  @UseGuards(TempTokenGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create username during onboarding' })
+  @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.USERNAME_SET_SUCCESS)
+  createUsername(
+    @Body() dto: CreateUsernameDto,
+    @Req() req: RequestWithTempToken,
+  ) {
+    return this.authService.createUsername(dto, req.tempTokenData);
+  }
+
   @Post('create-profile')
   @UseGuards(TempTokenGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Create user profile after OTP verification' })
+  @ApiOperation({ summary: 'Complete onboarding & create user profile' })
   @HttpCode(201)
   @ResponseMessage(AUTH_MESSAGES.PROFILE_CREATED)
   createProfile(
@@ -71,10 +102,20 @@ export class AuthController {
     return this.authService.createProfile(dto, req.tempTokenData, device);
   }
 
+  @Post('set-username')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Set username after social login' })
+  @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.USERNAME_SET_SUCCESS)
+  setUsername(@Body() dto: SetUsernameDto, @CurrentUser() user: JwtPayload) {
+    return this.authService.setUsername(user.userId, dto);
+  }
+
   @Post('login')
   @UseGuards(BasicAuthGuard)
   @ApiBasicAuth('BasicAuth')
-  @ApiOperation({ summary: 'Login with email/phone/username and password' })
+  @ApiOperation({ summary: 'Login with email/username and password' })
   @HttpCode(200)
   @ResponseMessage(AUTH_MESSAGES.LOGIN_SUCCESS)
   login(@Body() dto: LoginDto, @DeviceHeader() device: string) {
@@ -89,6 +130,26 @@ export class AuthController {
   @ResponseMessage(AUTH_MESSAGES.LOGIN_SUCCESS)
   loginWithFacebook(@Body() dto: FacebookLoginDto, @DeviceHeader() device: string) {
     return this.authService.facebookLogin(dto, device);
+  }
+
+  @Post('google-login')
+  @UseGuards(BasicAuthGuard)
+  @ApiBasicAuth('BasicAuth')
+  @ApiOperation({ summary: 'Login or signup via Google' })
+  @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.LOGIN_SUCCESS)
+  loginWithGoogle(@Body() dto: GoogleLoginDto, @DeviceHeader() device: string) {
+    return this.authService.googleLogin(dto, device);
+  }
+
+  @Post('apple-login')
+  @UseGuards(BasicAuthGuard)
+  @ApiBasicAuth('BasicAuth')
+  @ApiOperation({ summary: 'Login or signup via Apple' })
+  @HttpCode(200)
+  @ResponseMessage(AUTH_MESSAGES.LOGIN_SUCCESS)
+  loginWithApple(@Body() dto: AppleLoginDto, @DeviceHeader() device: string) {
+    return this.authService.appleLogin(dto, device);
   }
 
   @Post('reset-password')

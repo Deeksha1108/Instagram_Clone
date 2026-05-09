@@ -10,23 +10,32 @@ import {
 } from 'typeorm';
 import { SavedPost } from './saved-post.entity';
 import { PostTag } from './post-tag.entity';
+import { PostMedia } from './post-media.entity';
 
 @Entity('posts')
 @Index(['userId', 'createdAt', 'id'])
 export class Post extends BaseEntity {
   @Column({ name: 'user_id' })
-  userId: string;
+  userId!: string;
 
   @ManyToOne(() => User, (user) => user.posts, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
-  user: User;
+  user!: User;
 
-  @Column()
-  imageUrl: string;
+  @Column({ nullable: true, length: 2200 })
+  caption?: string;
+
+  @Column({ default: 0 })
+  mediaCount!: number;
+
+  @OneToMany(() => PostMedia, (media) => media.post, {
+    cascade: true,
+  })
+  media!: PostMedia[];
 
   @OneToMany(() => SavedPost, (sp) => sp.post)
-  savedBy: SavedPost[];
+  savedBy!: SavedPost[];
 
   @OneToMany(() => PostTag, (pt) => pt.post)
-  taggedUsers: PostTag[];
+  taggedUsers!: PostTag[];
 }

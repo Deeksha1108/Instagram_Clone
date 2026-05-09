@@ -224,7 +224,12 @@ export class UserService {
     qb = filterFn(qb);
 
     const posts = await qb
-      .select(['post.id', 'post.imageUrl', 'post.createdAt'])
+      .leftJoin('post.media', 'media')
+      .addSelect(['media.id', 'media.key', 'media.type', 'media.order'])
+      .select(['post.id', 'post.createdAt'])
+      .orderBy('post.createdAt', 'DESC')
+      .addOrderBy('post.id', 'DESC')
+      .addOrderBy('media.order', 'ASC')
       .getMany();
 
     const result = buildPaginatedResponse(posts, limit);

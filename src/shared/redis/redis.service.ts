@@ -4,12 +4,12 @@ import { COMMON_CONFIG } from 'src/config/common.config';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
-  private client: Redis;
+  private client!: Redis;
 
   onModuleInit() {
     this.client = new Redis({
-      host: COMMON_CONFIG.redis.host,
-      port: COMMON_CONFIG.redis.port,
+      host: COMMON_CONFIG.REDIS.host,
+      port: COMMON_CONFIG.REDIS.port,
     });
   }
 
@@ -32,5 +32,13 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   async incr(key: string) {
     await this.client.incr(key);
+  }
+
+  async incrWithExpire(key: string, ttlSeconds: number) {
+    const value = await this.client.incr(key);
+    if (value === 1) {
+      await this.client.expire(key, ttlSeconds);
+    }
+    return value;
   }
 }

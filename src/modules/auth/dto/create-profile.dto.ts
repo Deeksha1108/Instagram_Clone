@@ -1,36 +1,51 @@
-import { ApiProperty } from '@nestjs/swagger';
 import {
-  IsDateString,
+  IsArray,
+  ArrayMinSize,
+  IsOptional,
   IsEnum,
+  ArrayUnique,
   IsString,
   MaxLength,
-  MinLength,
-  Validate,
+  IsUrl,
 } from 'class-validator';
-import { Gender } from 'src/common/enum/enum.common';
-import { IsAdultValidator } from 'src/common/validators/dob.validator';
+import { INTERESTS, ACCOUNT_TYPE } from 'src/common/enum/enum.common';
+import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateProfileDto {
   @ApiProperty({ example: 'Deeksha Singh' })
   @IsString()
-  fullName: string;
+  fullName!: string;
 
-  @ApiProperty({ example: 'deeksha01' })
+  @ApiProperty({ example: 'Bio text...' })
+  @IsOptional()
   @IsString()
-  username: string;
+  @MaxLength(150)
+  bio?: string;
 
-  @ApiProperty({ example: '2000-01-01' })
-  @IsDateString({}, { message: 'Invalid date format' })
-  @Validate(IsAdultValidator)
-  dateOfBirth: string;
+  @ApiProperty({ example: 'https://yourwebsite.com' })
+  @IsOptional()
+  @IsUrl({}, { message: 'Please enter a valid URL.' })
+  website?: string;
 
-  @ApiProperty({ example: 'female' })
-  @IsEnum(Gender, { message: 'Gender must be 1, 2 or 3' })
-  gender: Gender;
-
-  @ApiProperty({ example: 'Pass@123' })
+  @ApiProperty({ example: 'she/her' })
+  @IsOptional()
   @IsString()
-  @MinLength(6, { message: 'Password must be at least 6 characters long' })
-  @MaxLength(10, { message: 'Password must not exceed 10 characters' })
-  password: string;
+  pronouns?: string;
+
+  @ApiProperty({ example: 'https://yourprofileurl' })
+  @IsOptional()
+  @IsString()
+  profilePicture?: string;
+
+  @ApiProperty({ example: ['Travel', 'Technology', 'Music'] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(3, { message: 'Please select at least 3 interests.' })
+  @ArrayUnique({ message: 'Duplicate interests are not allowed.' })
+  @IsEnum(INTERESTS, { each: true })
+  interests?: INTERESTS[];
+
+  @ApiProperty({ example: 'personal' })
+  @IsEnum(ACCOUNT_TYPE, { message: 'Invalid account type selected.' })
+  accountType!: ACCOUNT_TYPE;
 }

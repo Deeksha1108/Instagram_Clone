@@ -1,9 +1,11 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Request } from 'express';
+import { COMMON_CONFIG } from 'src/config/common.config';
 
 @Injectable()
 export class BasicAuthGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<Request>();
     const authHeader = request.headers['authorization'];
 
     if (!authHeader || !authHeader.startsWith('Basic ')) {
@@ -16,8 +18,8 @@ export class BasicAuthGuard implements CanActivate {
       .split(':');
 
     if (
-      username !== process.env.SEND_OTP_BASIC_USER ||
-      password !== process.env.SEND_OTP_BASIC_PASS
+      username !== COMMON_CONFIG.APP?.SEND_OTP_BASIC_USER ||
+      password !== COMMON_CONFIG.APP?.SEND_OTP_BASIC_PASS
     ) {
       throw new UnauthorizedException('Invalid Basic Auth credentials');
     }

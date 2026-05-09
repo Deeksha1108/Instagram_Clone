@@ -4,20 +4,27 @@ const env = envConfiguration();
 
 export const COMMON_CONFIG = {
   nodeEnv: env.nodeEnv,
+  jwt: env.Jwt,
+  AWS: env.Aws,
+  OTP: {
+    bypassEnabled: env.Otp.bypassEnabled,
+    bypassCode: env.Otp.bypassCode,
 
-  otp: {
-    bypassEnabled: env.otp.bypassEnabled,
-    bypassCode: env.otp.bypassCode,
-
-    rateLimitMax: env.otp.rateLimitMax,
-    rateLimitWindow: env.otp.rateLimitWindow,
-    maxVerifyAttempts: env.otp.maxVerifyAttempts,
+    rateLimitMax: env.Otp.rateLimitMax,
+    rateLimitWindow: env.Otp.rateLimitWindow,
+    maxVerifyAttempts: env.Otp.maxVerifyAttempts,
+    expiryMinutes: env.Otp.expiryMinutes,
+    onboardingSessionMinutes: env.Otp.onboardingSessionMinutes,
   },
 
-  redis: {
-    host: env.redis.host,
-    port: env.redis.port,
-  },
+  APP: env.App,
+  MAIL: env.Mail,
+  SMTP: env.Smtp,
+
+  REDIS: env.Redis,
+  FACEBOOK: env.Facebook,
+  GOOGLE: env.Google,
+  APPLE: env.Apple,
 };
 
 export const NODE_ENV_TYPE = {
@@ -28,5 +35,10 @@ export const NODE_ENV_TYPE = {
 };
 
 export const OTP_CONFIG = {
-  LENGTH: 6,
+  LENGTH: 4,
+};
+
+export const BCRYPT_CONFIG = {
+  OTP_SALT_ROUNDS: 6,
+  PASSWORD_SALT_ROUNDS: 10,
 };

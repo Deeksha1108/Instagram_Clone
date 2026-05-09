@@ -23,6 +23,7 @@ import {
 } from 'src/common/constants/constants';
 import { JWT_CONFIG } from 'src/config/jwt.config';
 import {
+  AppleJwtPayload,
   CreateProfileResponse,
   LoginResponse,
   RefreshTokenPayload,
@@ -35,6 +36,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { MailerService } from 'src/shared/mailer/mailer.service';
 import { AuthAttempt } from '../user/entities/auth_attempts.entity';
 import {
+  BCRYPT_CONFIG,
   COMMON_CONFIG,
   NODE_ENV_TYPE,
   OTP_CONFIG,
@@ -48,10 +50,18 @@ import { UserSession } from '../user/entities/user_sessions.entity';
 import { v4 as uuidv4 } from 'uuid';
 import { FacebookLoginDto } from './dto/facebook-login.dto';
 import { AUTH_MESSAGES } from './response/auth.response';
+import { GoogleLoginDto } from './dto/google.dto';
+import { AppleLoginDto } from './dto/apple.dto';
+import { SetUsernameDto } from './dto/setUsername.dto';
+import { OAuth2Client } from 'google-auth-library';
+import { verifyAppleToken } from 'src/common/utils/apple-jwt.util';
+import { CreatePasswordDto } from './dto/create-password.dto';
+import { CreateUsernameDto } from './dto/create-username.dto';
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private googleClient = new OAuth2Client(COMMON_CONFIG.GOOGLE.clientId);
 
   constructor(
     private readonly redisService: RedisService,
@@ -74,14 +84,13 @@ export class AuthService {
    * hashes & stores the OTP in Redis, and returns a short-lived temp token.
    */
   async sendOtp(dto: SendOtpDto): Promise<SendOtpResponse> {
-    const identifier = this.getIdentifier(dto);
-    const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${dto.type}`;
+    const identifier = this.getIdentifier({ email: dto.email, phone: dto.phone });
+    const rateLimitKey = `otp_rate_limit:${identifier}:${dto.type}`;
 
-    await this.checkOtpRateLimit(redisKey);
+    await this.checkOtpRateLimit(rateLimitKey);
 
-    const user = await this.userRepo.findOne({
+    const user = await this.userRepo.exist({
       where: dto.email ? { email: dto.email } : { phone: dto.phone },
-      select: ['id'],
     });
 
     if (dto.type === OtpType.SIGNUP && user) {
@@ -121,12 +130,14 @@ export class AuthService {
       { expiresIn: AUTH_CONSTANTS.TEMP_TOKEN_EXPIRES_IN },
     );
 
-    return { tempToken: token };
+    return { tempToken: token, maskedContact: this.maskContact(dto.email, dto.phone) };
   }
 
   /**
-   * Verifies the OTP for a given identifier; tracks attempts to prevent brute force
-   * and marks the Redis session as verified on success.
+   * Verifies OTP for signup/forgot-password flow.
+   * - Prevents brute-force via attempt tracking in Redis
+   * - Validates OTP (or bypass in dev/qa)
+   * - Marks session as verified and extends TTL for onboarding
    */
   async verifyOtp(
     dto: VerifyOtpDto,
@@ -137,6 +148,7 @@ export class AuthService {
       phone: tempTokenData.phoneNumber,
     });
     const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${tempTokenData.type}`;
+    const attemptsKey = `${redisKey}:attempts`;
     const session = await this.redisService.get(redisKey);
 
     if (!session) {
@@ -148,7 +160,8 @@ export class AuthService {
       this.logger.warn(`OTP already verified attempt for ${identifier}`);
       throw new BadRequestException(AUTH_MESSAGES.OTP_ALREADY_VERIFIED);
     }
-    if (session.verifyAttempts >= COMMON_CONFIG.otp.maxVerifyAttempts) {
+    const attempts = Number(await this.redisService.get(attemptsKey));
+    if (attempts >= COMMON_CONFIG.OTP.maxVerifyAttempts) {
       this.logger.warn(`OTP verify attempts exceeded for ${identifier}`);
       throw new ForbiddenException(AUTH_MESSAGES.TOO_MANY_VERIFY_OTP_ATTEMPTS);
     }
@@ -157,7 +170,8 @@ export class AuthService {
 
     let isMatch = false;
 
-    if (bypassAllowed && dto.otp === COMMON_CONFIG.otp.bypassCode) {
+    if (bypassAllowed && dto.otp === COMMON_CONFIG.OTP.bypassCode) {
+      isMatch = true;
       isMatch = true;
     } else if (dto.otp.length !== OTP_CONFIG.LENGTH) {
       isMatch = false;
@@ -165,29 +179,104 @@ export class AuthService {
       isMatch = await bcrypt.compare(dto.otp, session.otp);
     }
     if (!isMatch) {
-      session.verifyAttempts += 1;
-
-      await this.redisService.set(
-        redisKey,
-        session,
+      await this.redisService.incrWithExpire(
+        attemptsKey,
         AUTH_CONSTANTS.OTP_TTL_SECONDS,
       );
-
       this.logger.warn(`Invalid OTP attempt for ${identifier}`);
-
       throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP);
     }
-    session.verified = true;
 
     await this.redisService.set(
       redisKey,
-      session,
-      AUTH_CONSTANTS.OTP_TTL_SECONDS,
+      {
+        ...session,
+        verified: true,
+      },
+      AUTH_CONSTANTS.ONBOARDING_SESSION_TTL_SECONDS,
     );
     this.logger.log(`OTP verified successfully for ${identifier}`);
     return {
       verified: true,
     };
+  }
+  /**
+   * Stores hashed password in Redis session after OTP verification (signup flow).
+   */
+  async createPassword(
+    dto: CreatePasswordDto,
+    tempTokenData: TempTokenData,
+  ): Promise<void> {
+    const identifier = this.getIdentifier({
+      email: tempTokenData.email,
+      phone: tempTokenData.phoneNumber,
+    });
+
+    if (tempTokenData.type === OtpType.FORGOT_PASSWORD) {
+      throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP_TYPE);
+    }
+
+    const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${tempTokenData.type}`;
+
+    const session = await this.getValidatedSession(redisKey, {
+      requireVerified: true,
+    });
+    if (session.password) {
+      throw new BadRequestException(AUTH_MESSAGES.PASSWORD_ALREADY_SET);
+    }
+
+    const hashedPassword = await bcrypt.hash(
+      dto.password,
+      BCRYPT_CONFIG.PASSWORD_SALT_ROUNDS,
+    );
+
+    session.password = hashedPassword;
+
+    await this.redisService.set(
+      redisKey,
+      session,
+      AUTH_CONSTANTS.ONBOARDING_SESSION_TTL_SECONDS,
+    );
+
+    this.logger.log(`Password created for ${identifier}`);
+  }
+
+  /* Validates uniqueness and stores username in Redis Session. */
+  async createUsername(
+    dto: CreateUsernameDto,
+    tempTokenData: TempTokenData,
+  ): Promise<void> {
+    const identifier = this.getIdentifier({
+      email: tempTokenData.email,
+      phone: tempTokenData.phoneNumber,
+    });
+
+    const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${tempTokenData.type}`;
+
+    const session = await this.getValidatedSession(redisKey, {
+      requireVerified: true,
+      requirePassword: true,
+    });
+
+    if (session.username) {
+      throw new BadRequestException(AUTH_MESSAGES.USERNAME_ALREADY_SET);
+    }
+
+    const exists = await this.userRepo.exist({
+      where: { username: dto.username },
+    });
+
+    if (exists) {
+      throw new BadRequestException(AUTH_MESSAGES.USERNAME_TAKEN);
+    }
+
+    session.username = dto.username;
+
+    await this.redisService.set(
+      redisKey,
+      session,
+      AUTH_CONSTANTS.ONBOARDING_SESSION_TTL_SECONDS,
+    );
   }
 
   /**
@@ -198,76 +287,78 @@ export class AuthService {
     tempTokenData: TempTokenData,
     device: string,
   ): Promise<CreateProfileResponse> {
+    if (tempTokenData.type === OtpType.FORGOT_PASSWORD) {
+      throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP_TYPE);
+    }
     const identifier = this.getIdentifier({
       email: tempTokenData.email,
       phone: tempTokenData.phoneNumber,
     });
     const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${tempTokenData.type}`;
 
-    const otpSession = await this.redisService.get(redisKey);
-
-    if (!otpSession) {
-      throw new NotFoundException(AUTH_MESSAGES.OTP_SESSION_EXPIRED);
-    }
-
-    if (otpSession.type === OtpType.FORGOT_PASSWORD) {
-      throw new BadRequestException(AUTH_MESSAGES.INVALID_OTP_TYPE);
-    }
-
-    if (!otpSession.verified) {
-      throw new UnauthorizedException(AUTH_MESSAGES.OTP_NOT_VERIFIED);
-    }
-
-    const existingUser = await this.userRepo.exist({
-      where: { username: dto.username },
+    const session = await this.getValidatedSession(redisKey, {
+      requireVerified: true,
+      requirePassword: true,
+      requireUsername: true,
     });
-    if (existingUser) {
-      this.logger.warn(`Username already taken: ${dto.username}`);
-      throw new BadRequestException(AUTH_MESSAGES.USERNAME_TAKEN);
-    }
-    const hashedPassword = await bcrypt.hash(dto.password, 8);
 
-    const dob = new Date(dto.dateOfBirth);
-    const age = this.calculateAge(dob);
-
-    if (age < 18) {
-      throw new BadRequestException(AUTH_MESSAGES.USER_UNDERAGE);
-    }
     const user = this.userRepo.create({
       ...(tempTokenData.email && { email: tempTokenData.email }),
       ...(tempTokenData.phoneNumber && { phone: tempTokenData.phoneNumber }),
       fullName: dto.fullName,
-      username: dto.username,
-      age: age,
-      dateOfBirth: dob,
-      gender: dto.gender,
-      password: hashedPassword,
+      bio: dto.bio,
+      website: dto.website,
+      pronouns: dto.pronouns,
+      profilePicture: dto.profilePicture,
+      username: session.username,
+      password: session.password,
       isVerified: true,
+      accountType: dto.accountType,
+      interests: dto.interests ?? [],
     });
 
     await this.userRepo.save(user);
+
+    // cleanup
     await this.redisService.del(redisKey);
 
-    const session = await this.createUserSessionAndTokens(
+    // session tokens
+    const authSession = await this.createUserSessionAndTokens(
       user,
       AUTH_PROVIDERS.LOCAL,
       device,
     );
-    this.logger.log(`User profile created: ${user.id}`);
-    return session;
+    this.logger.log(`User onboarding completed: ${user.id}`);
+    return authSession;
   }
+
   /**
-   * Authenticates a user with email/phone/username + password and returns auth tokens.
+   * Sets a unique username for a user after social login.
+   * Ensures username uniqueness before updating the record.
    */
-  async login(dto: LoginDto,device: string): Promise<LoginResponse> {
-    let query;
-    if (dto.email) {
-      query = { email: dto.email, isVerified: true };
-    } else if (dto.phone) {
-      query = { phone: dto.phone, isVerified: true };
-    } else {
-      query = { username: dto.username, isVerified: true };
+  async setUsername(userId: string, dto: SetUsernameDto) {
+    const existing = await this.userRepo.findOne({
+      where: { username: dto.username },
+    });
+
+    if (existing) {
+      throw new BadRequestException(AUTH_MESSAGES.USERNAME_TAKEN);
     }
+
+    await this.userRepo.update(userId, {
+      username: dto.username,
+    });
+
+    return { message: 'Username set successfully' };
+  }
+
+  /**
+   * Validates credentials and returns session tokens.
+   * Supports login via email or username.
+   */
+  async login(dto: LoginDto, device: string): Promise<LoginResponse> {
+    const identifier = dto.email || dto.username;
+    const query = dto.email ? { email: dto.email, isVerified: true } : { username: dto.username, isVerified: true };
     const user = await this.userRepo.findOne({
       where: query,
       select: ['id', 'password', 'username'],
@@ -276,27 +367,29 @@ export class AuthService {
     if (!user) {
       this.authAttemptRepo
         .save({
-          email: dto.email,
-          phone: dto.phone,
+          identifier,
           attemptType: AttemptType.LOGIN,
           status: AttemptStatus.INVALID_USER,
         })
         .catch(() => {});
+      this.logger.warn(`Invalid login attempt (user not found): ${identifier}`);
 
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
-
+    if (!user.password) {
+      throw new UnauthorizedException(AUTH_MESSAGES.USE_SOCIAL_LOGIN);
+    }
     const passwordMatch = await bcrypt.compare(dto.password, user.password);
 
     if (!passwordMatch) {
       this.authAttemptRepo
         .save({
-          email: dto.email,
-          phone: dto.phone,
+          identifier,
           attemptType: AttemptType.LOGIN,
           status: AttemptStatus.WRONG_PASSWORD,
         })
         .catch(() => {});
+      this.logger.warn(`Invalid login attempt (wrong password): ${identifier}`);
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 
@@ -306,14 +399,13 @@ export class AuthService {
       device,
     );
 
-    this.logger.log(`User logged in: ${user.id}`);
+    this.logger.log(`User logged in successfully: ${user.id}`);
 
     return session;
   }
 
   /**
-   * Logs in or registers a user via Facebook access token;
-   * links to an existing account by email if found, otherwise creates a new one.
+   * Handles Facebook OAuth login/signup and links existing accounts if needed.
    */
   async facebookLogin(
     dto: FacebookLoginDto,
@@ -340,20 +432,25 @@ export class AuthService {
     if (!profile?.id) {
       throw new UnauthorizedException(AUTH_MESSAGES.FACEBOOK_USER_NOT_VERIFIED);
     }
-    const whereConditions: any[] = [{ facebookId: profile.id }];
+    const whereConditions: any[] = [
+      {
+        provider: AUTH_PROVIDERS.FACEBOOK,
+        providerId: profile.id,
+      },
+    ];
     if (profile.email) {
       whereConditions.push({ email: profile.email });
     }
     let user = await this.userRepo.findOne({
       where: whereConditions,
-      select: ['id', 'email', 'facebookId', 'provider'],
+      select: ['id', 'email', 'providerId', 'provider'],
     });
-    if (user && !user.facebookId) {
+    if (user && !user.providerId) {
       await this.userRepo.update(user.id, {
-        facebookId: profile.id,
+        providerId: profile.id,
         provider: AUTH_PROVIDERS.FACEBOOK,
       });
-      user.facebookId = profile.id;
+      user.providerId = profile.id;
       user.provider = AUTH_PROVIDERS.FACEBOOK;
     }
     if (!user) {
@@ -361,7 +458,7 @@ export class AuthService {
         email: profile.email,
         fullName: profile.name,
         isVerified: true,
-        facebookId: profile.id,
+        providerId: profile.id,
         provider: AUTH_PROVIDERS.FACEBOOK,
       });
 
@@ -374,6 +471,165 @@ export class AuthService {
     );
     this.logger.log(`Facebook login successful for user: ${user.id}`);
     return session;
+  }
+
+  /**
+   * Handles Google OAuth login/signup with token verification.
+   */
+  async googleLogin(
+    dto: GoogleLoginDto,
+    device: string,
+  ): Promise<LoginResponse> {
+    let ticket;
+
+    try {
+      ticket = await this.googleClient.verifyIdToken({
+        idToken: dto.idToken,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+    } catch (error) {
+      this.logger.error('Google token verification failed', error);
+      throw new UnauthorizedException(AUTH_MESSAGES.GOOGLE_VERIFICATION_FAILED);
+    }
+    const payload = ticket.getPayload();
+
+    if (!payload) {
+      throw new UnauthorizedException(AUTH_MESSAGES.GOOGLE_USER_NOT_VERIFIED);
+    }
+    // Required validation
+    if (!payload?.sub) {
+      throw new UnauthorizedException(AUTH_MESSAGES.GOOGLE_USER_NOT_VERIFIED);
+    }
+
+    if (payload.email && payload.email_verified !== true) {
+      throw new UnauthorizedException(AUTH_MESSAGES.GOOGLE_EMAIL_NOT_VERIFIED);
+    }
+
+    // Find user
+    const whereConditions: any[] = [
+      {
+        provider: AUTH_PROVIDERS.GOOGLE,
+        providerId: payload.sub,
+      },
+    ];
+
+    if (payload.email) {
+      whereConditions.push({ email: payload.email });
+    }
+
+    let user = await this.userRepo.findOne({
+      where: whereConditions,
+      select: ['id', 'email', 'providerId', 'provider', 'username'],
+    });
+
+    // Link existing user (email-based account)
+    if (user && !user.providerId) {
+      await this.userRepo.update(user.id, {
+        providerId: payload.sub,
+        provider: AUTH_PROVIDERS.GOOGLE,
+      });
+
+      user.providerId = payload.sub;
+      user.provider = AUTH_PROVIDERS.GOOGLE;
+    }
+
+    // Create new user
+    if (!user) {
+      user = this.userRepo.create({
+        email: payload.email,
+        fullName: payload.name,
+        isVerified: true,
+        providerId: payload.sub,
+        provider: AUTH_PROVIDERS.GOOGLE,
+        profilePicture: payload.picture,
+      });
+
+      await this.userRepo.save(user);
+    }
+
+    // Create session + tokens
+    const session = await this.createUserSessionAndTokens(
+      user,
+      AUTH_PROVIDERS.GOOGLE,
+      device,
+    );
+
+    this.logger.log(`Google login successful for user: ${user.id}`);
+
+    return {
+      ...session,
+      needsUsername: !user.username,
+    };
+  }
+
+  /**
+   * Handles Apple OAuth login/signup using identity token.
+   */
+  async appleLogin(dto: AppleLoginDto, device: string): Promise<LoginResponse> {
+    let payload: AppleJwtPayload;
+
+    try {
+      payload = await verifyAppleToken(dto.identityToken);
+    } catch (err) {
+      this.logger.error('Apple token verification failed', err);
+      throw new UnauthorizedException(AUTH_MESSAGES.APPLE_VERIFICATION_FAILED);
+    }
+
+    if (!payload?.sub) {
+      throw new UnauthorizedException(AUTH_MESSAGES.APPLE_USER_NOT_VERIFIED);
+    }
+
+    const whereConditions: any[] = [
+      {
+        provider: AUTH_PROVIDERS.APPLE,
+        providerId: payload.sub,
+      },
+    ];
+
+    if (payload.email) {
+      whereConditions.push({ email: payload.email });
+    }
+
+    let user = await this.userRepo.findOne({
+      where: whereConditions,
+      select: ['id', 'email', 'providerId', 'provider', 'username'],
+    });
+
+    // link existing
+    if (user && !user.providerId) {
+      await this.userRepo.update(user.id, {
+        providerId: payload.sub,
+        provider: AUTH_PROVIDERS.APPLE,
+      });
+
+      user.providerId = payload.sub;
+      user.provider = AUTH_PROVIDERS.APPLE;
+    }
+
+    // create new
+    if (!user) {
+      user = this.userRepo.create({
+        email: payload.email,
+        // Apple sends fullName only on the very first sign-in via the client DTO
+        fullName: dto.fullName,
+        isVerified: true,
+        providerId: payload.sub,
+        provider: AUTH_PROVIDERS.APPLE,
+      });
+
+      await this.userRepo.save(user);
+    }
+
+    const session = await this.createUserSessionAndTokens(
+      user,
+      AUTH_PROVIDERS.APPLE,
+      device,
+    );
+
+    return {
+      ...session,
+      needsUsername: !user.username,
+    };
   }
 
   /**
@@ -390,12 +646,8 @@ export class AuthService {
       },
     });
 
-    if (!session) {
+    if (!session || session.expiresAt < new Date()) {
       throw new UnauthorizedException(AUTH_MESSAGES.INVALID_REFRESH_TOKEN);
-    }
-
-    if (session.expiresAt < new Date()) {
-      throw new UnauthorizedException(AUTH_MESSAGES.SESSION_EXPIRED);
     }
 
     const key = `${REDIS_KEYS.REFRESH_TOKEN}:${payload.sessionId}`;
@@ -423,8 +675,7 @@ export class AuthService {
   }
 
   /**
-   * Resets the user's password after verifying the forgot-password OTP;
-   * rejects if the new password is the same as the current one.
+   * Updates user password after OTP verification (forgot-password flow).
    */
   async resetPassword(
     dto: ResetPasswordDto,
@@ -465,7 +716,7 @@ export class AuthService {
       throw new BadRequestException(AUTH_MESSAGES.PASSWORD_MUST_BE_DIFFERENT);
     }
 
-    const hashedPassword = await bcrypt.hash(dto.newPassword, 8);
+    const hashedPassword = await bcrypt.hash(dto.newPassword, BCRYPT_CONFIG.PASSWORD_SALT_ROUNDS);
 
     await Promise.all([
       this.userRepo.update(user.id, { password: hashedPassword }),
@@ -476,8 +727,7 @@ export class AuthService {
   }
 
   /**
-   * Resends OTP if the previous session is still valid; rate-limited and
-   * respects the OTP bypass setting in dev/qa environments.
+   * Regenerates OTP if session is valid and not yet verfied.
    */
   async resendOtp(tempTokenData: TempTokenData): Promise<SendOtpResponse> {
     const identifier = this.getIdentifier({
@@ -523,11 +773,11 @@ export class AuthService {
 
     this.logger.log(`OTP resent successfully for ${identifier}`);
 
-    return { tempToken: token };
+    return { tempToken: token, maskedContact: this.maskContact( tempTokenData.email, tempTokenData.phoneNumber ) };
   }
 
   /**
-   * Deactivates the given session in DB and removes its refresh token from Redis.
+   * Invalidates a single session and removes its refresh token.
    */
   async logout(sessionId: string): Promise<void> {
     const session = await this.userSessionRepo.findOne({
@@ -548,7 +798,7 @@ export class AuthService {
   }
 
   /**
-   * Deactivates all active sessions for a user and clears their refresh tokens from Redis.
+   * Logged out user from all devices by invalidating all sessions.
    */
   async logoutAll(userId: string): Promise<void> {
     const sessions = await this.userSessionRepo.find({
@@ -575,7 +825,7 @@ export class AuthService {
   }
 
   // Helper functions
-  /** Returns email or phone as a single identifier string; throws if neither is provided. */
+  /** Returns unique identifier (email or phone) */
   private getIdentifier(data: { email?: string; phone?: string }): string {
     const identifier = data.email || data.phone;
     if (!identifier) {
@@ -584,43 +834,47 @@ export class AuthService {
     return identifier;
   }
 
-  /** Generates a 6-digit random OTP string. */
+  /** Generates numeric OTP of configured length */
   private generateRandomOtp(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    const length = OTP_CONFIG.LENGTH;
+    const min = Math.pow(10, length - 1);
+    const max = Math.pow(10, length) - 1;
+
+    return Math.floor(min + Math.random() * (max - min)).toString();
   }
 
-  /** Enforces per-identifier OTP request rate limiting via Redis; throws if the limit is exceeded. */
+  /** Enforces OTP request rate limiting using Redis. */
   private async checkOtpRateLimit(identifier: string): Promise<void> {
     const key = `otp_rate_limit:${identifier}`;
 
     const attempts = await this.redisService.get(key);
 
-    if (attempts && Number(attempts) >= COMMON_CONFIG.otp.rateLimitMax) {
+    if (attempts && Number(attempts) >= COMMON_CONFIG.OTP.rateLimitMax) {
       this.logger.warn(`OTP rate limit exceeded for ${identifier}`);
       throw new ForbiddenException(AUTH_MESSAGES.TOO_MANY_OTP_REQUESTS);
     }
 
     if (!attempts) {
-      await this.redisService.set(key, 1, COMMON_CONFIG.otp.rateLimitWindow);
+      await this.redisService.set(key, 1, COMMON_CONFIG.OTP.rateLimitWindow);
     } else {
       await this.redisService.incr(key);
     }
   }
 
-  /** Returns true if OTP bypass is enabled and the current environment is dev or QA. */
+  /** Checks if OTP bypass is enabled (dev/qa only) */
   private isOtpBypassAllowed() {
     return (
-      COMMON_CONFIG.otp.bypassEnabled &&
-      [NODE_ENV_TYPE.DEV, NODE_ENV_TYPE.QA].includes(COMMON_CONFIG.nodeEnv)
+      COMMON_CONFIG.OTP.bypassEnabled &&
+      [NODE_ENV_TYPE.DEV, NODE_ENV_TYPE.QA].includes(
+        COMMON_CONFIG.nodeEnv as string,
+      )
     );
   }
 
-  /**
-   * Signs and returns access + refresh JWT tokens for the given session payload.
-   */
+  /** Generate access + refresh JWT tokens. */
   private generateJwtTokens(payload: {
     userId: string;
-    username: string;
+    username?: string;
     sessionId: string;
   }) {
     const accessToken = this.jwtService.sign(payload, {
@@ -637,8 +891,7 @@ export class AuthService {
   }
 
   /**
-   * Persists a new session record in DB, stores the refresh token in Redis,
-   * and returns the access + refresh token pair.
+   * Creates session, stores refresh token, returns auth tokens
    */
   private async createUserSessionAndTokens(
     user: User,
@@ -679,7 +932,29 @@ export class AuthService {
       refreshToken,
     };
   }
+  /**
+   * Masks contact info for secure display (OTP screen).
+   * Email: a***@gmail.com / tes***@gmail.com
+   * Phone (E.164): +919876543210 → +91****3210
+   */
+  private maskContact(email?: string, phone?: string): string {
+    if (email) {
+      const [local = '', domain = ''] = email.split('@');
+      const visibleLength = Math.min(3, local.length);
+      const visiblePart = local.slice(0, visibleLength);
+      return `${visiblePart}***@${domain}`;
+    }
+    if (phone) {
+      const normalized = phone.trim();
+      const match = normalized.match(/^(\+\d{1,3})(\d{4,})$/);
+      if (!match) return '';
+      const [, countryCode, number] = match;
+      return `${countryCode}****${number.slice(-4)}`;
+    }
+    return '';
+  }
 
+  /** Deletes refresh tokens for given session IDs */
   private async invalidateSessions(sessionIds: string[]): Promise<void> {
     if (!sessionIds.length) return;
 
@@ -690,6 +965,7 @@ export class AuthService {
     );
   }
 
+  /* TODO: Remove this function in future, it will not be needed. */
   private calculateAge(dob: Date): number {
     const today = new Date();
     let age = today.getFullYear() - dob.getFullYear();
@@ -703,6 +979,10 @@ export class AuthService {
     return age;
   }
 
+  /**
+   * Generates OTP, hashes it, and stores in Redis.
+   * Sends email/SMS if not bypassed.
+   */
   private async generateAndStoreOtp(
     identifier: string,
     type: OtpType,
@@ -711,11 +991,11 @@ export class AuthService {
   ) {
     const bypassAllowed = this.isOtpBypassAllowed();
 
-    const otp = bypassAllowed
-      ? COMMON_CONFIG.otp.bypassCode
-      : this.generateRandomOtp();
+    const otp = bypassAllowed && COMMON_CONFIG.OTP.bypassCode
+        ? COMMON_CONFIG.OTP.bypassCode
+        : this.generateRandomOtp();
 
-    const hashedOtp = await bcrypt.hash(otp, 6);
+    const hashedOtp = await bcrypt.hash(otp, BCRYPT_CONFIG.OTP_SALT_ROUNDS);
 
     const redisKey = `${AUTH_CONSTANTS.OTP_REDIS_PREFIX}${identifier}:${type}`;
 
@@ -737,5 +1017,30 @@ export class AuthService {
     if (phone && !bypassAllowed) {
       // integrate SMS provider here
     }
+  }
+
+  private async getValidatedSession(
+    redisKey: string,
+    options?: {
+      requireVerified?: boolean;
+      requirePassword?: boolean;
+      requireUsername?: boolean;
+    },
+  ) {
+    const session = await this.redisService.get(redisKey);
+
+    if (!session) {
+      throw new NotFoundException(AUTH_MESSAGES.OTP_SESSION_EXPIRED);
+    }
+    if (options?.requireVerified && !session.verified) {
+      throw new UnauthorizedException(AUTH_MESSAGES.OTP_NOT_VERIFIED);
+    }
+    if (options?.requirePassword && !session.password) {
+      throw new BadRequestException(AUTH_MESSAGES.PASSWORD_NOT_SET);
+    }
+    if (options?.requireUsername && !session.username) {
+      throw new BadRequestException(AUTH_MESSAGES.USERNAME_NOT_SET);
+    }
+    return session;
   }
 }
